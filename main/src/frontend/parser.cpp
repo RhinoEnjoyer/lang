@@ -83,7 +83,9 @@ struct node_t {
 #define DISPATCH_ARGS toks,buffer, cursor /*, end*/
 #define DISPATCH_FNSIG (DISPATCH_ARGS_DECL)->void
 #define DISPATCH_LAM [] DISPATCH_FNSIG
+
 using fn_t = auto DISPATCH_FNSIG;
+using pair_t = std::pair<tokc::e,fn_t*>;
 
 template <node_t::median_t::code_t type, auto FN>
 auto dive(DISPATCH_ARGS_DECL) -> void {
@@ -100,45 +102,35 @@ auto dive(DISPATCH_ARGS_DECL) -> void {
 template <typename... T> using tup = std::tuple<T...>;
 
 template <const tokc::e... type>
-[[nodiscard]] auto is(cursor_t &&cursor) -> bool {
+[[nodiscard]] inline auto is(auto cursor) -> bool {
   return ((cursor->type_ == type) || ...);
 }
-template <const tokc::e... type>
-[[nodiscard]] auto is(cursor_t &cursor) -> bool {
-  return ((cursor->type_ == type) || ...);
+
+// template <const auto type>
+// [[nodiscard]] auto is(cursor_t cursor){
+//   for(const auto& elm: type){
+//     if(elm == cursor->type_)
+//       return true;
+//   }
+//   return false;
+// }
+
+template <const tokc::e... type> auto expected(DISPATCH_ARGS_DECL) -> void {
+  std::cerr << "Str: \'" << toks.str(cursor) << "\'"
+            << "\n\tType: " << toks.str(cursor)
+            << "\n\tRow: " << toks.row(cursor) << "\tCol: " << toks.col(cursor)
+            << "\tLen: " << toks.len(cursor) << "\n";
+
+  std::cerr << "Expected: ";
+  ((std::cerr << token_code_str(type) << " "), ...);
+  std::cerr << "\b\n\tFound: " << token_code_str(cursor->type_) << '\n';
+  std::abort();
 }
 
 template <const tokc::e... type> auto expect(DISPATCH_ARGS_DECL) -> void {
-  if (is<type...>(cursor)) [[likely]] {
-    return;
-  } else [[unlikely]] {
-
-    std::cerr << "Str: \'" << toks.str(cursor) << "\'"
-                 << "\n\tType: " << toks.str(cursor)
-                 << "\n\tRow: " << toks.row(cursor)
-                 << "\tCol: " << toks.col(cursor)
-                 << "\tLen: " << toks.len(cursor) << "\n";
-
-    std::cerr << "Expected: ";
-    ((std::cerr << token_code_str(type) << " "), ...);
-    std::cerr << "\b\n\tFound: " << token_code_str(cursor->type_) << '\n';
-    std::abort();
-  }
+  if (!is<type...>(cursor)) [[unlikely]]
+    BECOME expected<type...>(DISPATCH_ARGS);
 }
-
-
-/* WE DO NOT HAVE A END ANYMORE*/
-[[clang::preserve_most, clang::noinline, nodiscard]] auto
-backtrack(cursor_t &cursor, const cursor_t end) {
-  auto c = cursor;
-  while (c->type_ != tokc::e::BEGINSYMETRICAL && c->type_ != tokc::e::ENDSTMT &&
-         c->type_ != tokc::e::ENDGROUP)
-    --c;
-  if (c != cursor)
-    ++c;
-  return c;
-}
-
 
 template <std::size_t match_cursor_offset, auto fallback_, std::pair<tokc::e, fn_t *>... args>
  auto path DISPATCH_FNSIG {
@@ -193,7 +185,7 @@ template <std::size_t match_cursor_offset, auto fallback_, std::pair<tokc::e, fn
   BECOME dispatch_table[(cursor + match_cursor_offset)->type_](toks, buffer,cursor);
 }
 
-template <auto fallback_, std::pair<tokc::e, fn_t *>... args>
+template <auto fallback_, pair_t... args>
 auto path DISPATCH_FNSIG {
   BECOME path<0, fallback_, args...>(DISPATCH_ARGS);
 }
@@ -242,12 +234,15 @@ template<auto fn> auto advance2 DISPATCH_FNSIG{
   cursor.advance();
   fn(DISPATCH_ARGS);
 }
+
 template<int dive_code,auto fn> auto advance2 DISPATCH_FNSIG{
   BECOME dive<dive_code, advance2<fn>>(DISPATCH_ARGS);
 }
 
-template <int dive_code, fn_t* fn = base, tokc::e open_code = tokc::e::LPAREN>
-auto advance2symetrical DISPATCH_FNSIG { BECOME advance2<dive_code, symetrical<fn, open_code>>(DISPATCH_ARGS);}
+template <int dive_code, fn_t *fn = base, tokc::e open_code = tokc::e::LPAREN>
+auto advance2symetrical DISPATCH_FNSIG {
+  BECOME advance2<dive_code, symetrical<fn, open_code>>(DISPATCH_ARGS);
+}
 
 auto decl DISPATCH_FNSIG;
 auto expr DISPATCH_FNSIG;
@@ -264,7 +259,7 @@ static auto placeholder = DISPATCH_LAM {
   std::abort();
 };
 
-auto as DISPATCH_FNSIG{ BECOME advance2symetrical<98,type>(DISPATCH_ARGS);}
+auto& as = advance2symetrical<98,type>;
 
 const auto &fn_sig = dive<20, DISPATCH_LAM {
   cursor.advance();
@@ -282,8 +277,8 @@ const auto &fn_sig = dive<20, DISPATCH_LAM {
   symetrical<type, tokc::LPAREN>(DISPATCH_ARGS);
 }>;
 
-// @(type)::
-// @[]::
+
+//@(expr;expr;...)
 const auto &duck = advance2<dive<9909923, symetrical<expr, tokc::e::LPAREN>>>;
 
 const auto& compound =  dive < 760, DISPATCH_LAM {
@@ -297,7 +292,7 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
     do {
       path <DISPATCH_LAM {std::cerr << "Invalid compound element" << '\n';std::abort();},
       {tokc::ID, DISPATCH_LAM{buffer.push_back(node_t::make(cursor));cursor.advance();}},
-      {tokc::e::LPAREN,  symetrical<expr,tokc::LPAREN>},
+      {tokc::e::LPAREN,  symetrical<tokc::LPAREN>},
       {tokc::e::LBRACE,  symetrical<expr,tokc::LBRACE>},
       {tokc::e::LCBRACE, symetrical<type<expr>,tokc::LCBRACE>}
       > (DISPATCH_ARGS);
@@ -309,17 +304,58 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
 }
 >;
 
-constexpr auto type_table = std::array{
-  std::pair<tokc::e,fn_t*>{tokc::e::ID, dive<99099,compound>},// this can be a scope, variable id or type
-  std::pair<tokc::e,fn_t*>{tokc::e::BUILTIN_FN, dive<30,fn_sig>}, 
-  std::pair<tokc::e,fn_t*>{tokc::e::BUILTIN_REC, dive<30,advance2symetrical<665,decl>>},
-  std::pair<tokc::e,fn_t*>{tokc::e::BUILTIN_UNION, dive<30,advance2symetrical<666,decl>>},
-  std::pair<tokc::e,fn_t*>{tokc::e::BUILTIN_ENUM, placeholder},
-  std::pair<tokc::e,fn_t*>{tokc::e::BUILTIN_SCOPE, dive<30,DISPATCH_LAM{buffer.push_back(node_t::make(cursor));cursor.advance();}>}, 
-  std::pair<tokc::e,fn_t*>{tokc::e::BUILTIN_VECTOR, dive<30,advance2symetrical<669,expr>>},
-  std::pair<tokc::e,fn_t*>{tokc::e::BUILTIN_TYPEOF, dive<30,advance2symetrical<667,base>>}
+auto push_final(DISPATCH_ARGS_DECL) {
+  buffer.push_back(node_t::make(cursor));
+  cursor.advance();
+}
+
+
+constexpr auto combine_tables = [](auto a, auto b) constexpr -> auto {
+  auto table = std::array<std::pair<tokc::e,fn_t*>, a.size() + b.size()>{};
+  std::uint64_t index = 0;
+  for (std::uint64_t i = 0; i < a.size(); i++) {
+    table[index] = a[i];
+    index++;
+  }
+  for (std::uint64_t i = 0; i < b.size(); i++) {
+    table[index] = b[i];
+    index++;
+  }
+  return table;
+
 };
 
+
+
+struct table_entry_t{
+  tokc::e type;
+  fn_t* fn;
+  const char* fn_name;
+
+  consteval static auto make(const tokc::e type, fn_t *fn,
+                             const char *fn_str) -> table_entry_t {
+    return {type, fn, fn_str};
+  };
+};
+
+#define table_entry_make(TYPE,FN)\
+  table_entry_t::make(TYPE,FN, #FN)
+
+
+
+
+
+constexpr auto aggregate_table = std::array{
+  pair_t{tokc::e::BUILTIN_SCOPE, dive<30,push_final>}, 
+  pair_t{tokc::e::BUILTIN_FN, dive<30,fn_sig>}, 
+
+  pair_t{tokc::e::BUILTIN_REC, dive<30,advance2symetrical<665,decl>>},
+  pair_t{tokc::e::BUILTIN_UNION, dive<30,advance2symetrical<666,decl>>},
+  pair_t{tokc::e::BUILTIN_ENUM, dive<30,advance2symetrical<666,expr>>},
+  pair_t{tokc::e::BUILTIN_VECTOR, dive<30,advance2symetrical<669,expr>>},
+  pair_t{tokc::e::BUILTIN_TYPEOF, dive<30,advance2symetrical<667,base>>}
+};
+constexpr auto type_table = combine_tables(aggregate_table, std::array{pair_t{tokc::e::ID, dive<99099, compound>}});
 constexpr auto type_codes = [] consteval -> auto {
   auto table = std::array<tokc::e, type_table.size()>{tokc::e::ERROR};
   std::transform(type_table.begin(), type_table.end(), table.begin(),
@@ -345,19 +381,13 @@ auto extend(std::uint64_t index,DISPATCH_ARGS_DECL){
   buffer.at(index).as_median().len_ = length;
 };
 
-auto push_final(DISPATCH_ARGS_DECL) {
-  buffer.push_back(node_t::make(cursor));
-  cursor.advance();
-}
 
 //compound_state 
 // = -1 only type
 // = 0  type and compound
 // = 1 only compound
 
-template<fn_t* const fallback, int compound_state>
-auto type DISPATCH_FNSIG {
-
+template <fn_t *const fallback, const int is_compound> auto type DISPATCH_FNSIG {
   // constexpr int compound_state = 1;
   constexpr auto dive_code = [] consteval -> int{
     if constexpr (fallback != nullptr)
@@ -365,18 +395,17 @@ auto type DISPATCH_FNSIG {
     return 30;
   }();
 
-  auto impl = []<std::pair<tokc::e, fn_t *>... args>(DISPATCH_ARGS_DECL) static -> void{
-
+  auto impl = []<pair_t... args>(DISPATCH_ARGS_DECL) static -> void{
     std::size_t memento = buffer.size();
-    
+   
     if constexpr (dive_code == 99099) {
       path<dive<99099,fallback>, args...>(DISPATCH_ARGS);
     }else {
-      /* [[clang ::musttail]] */ path<nullptr,args...>(DISPATCH_ARGS);
+      path<nullptr,args...>(DISPATCH_ARGS);
     }
     
-    if constexpr (compound_state >= 0){
-      if constexpr (compound_state == 1)
+    if constexpr (is_compound >= 0){
+      if constexpr (is_compound == 1)
         expect<tokc::e::DCOLON>(DISPATCH_ARGS);
       
       if(is<tokc::e::DCOLON>(cursor)){
@@ -398,7 +427,7 @@ auto type DISPATCH_FNSIG {
        {tokc::e::BUILTIN_REC, dive<30,advance2symetrical<665,decl>>},
        {tokc::e::BUILTIN_UNION, dive<30,advance2symetrical<666,decl>>},
        {tokc::e::BUILTIN_ENUM, placeholder},
-       {tokc::e::BUILTIN_SCOPE, dive<30,DISPATCH_LAM{buffer.push_back(node_t::make(cursor));cursor.advance();}>}, 
+       {tokc::e::BUILTIN_SCOPE, dive<30,push_final>}, 
        {tokc::e::BUILTIN_VECTOR, dive<30,advance2symetrical<669,expr>>},
        {tokc::e::BUILTIN_TYPEOF, dive<30,advance2symetrical<667,base>>}    
     >(DISPATCH_ARGS);
@@ -419,7 +448,6 @@ auto expr DISPATCH_FNSIG {
     std::abort();
   }
   dive < 40, DISPATCH_LAM {
-    auto memento = 1;
     do {
       path<{tokc::e::ID, compound},
 
@@ -442,12 +470,22 @@ auto expr DISPATCH_FNSIG {
   > (DISPATCH_ARGS);
 }
 
+auto alias_decl DISPATCH_FNSIG {
+  dive < 214241, DISPATCH_LAM {
+    push_final(DISPATCH_ARGS);
+    cursor.advance(2);
 
-// namespace stmt {
-auto decl DISPATCH_FNSIG {
-  dive < 50, DISPATCH_LAM {
-    buffer.push_back(node_t::make(cursor));
+    expect<tokc::e::ASIGN>(DISPATCH_ARGS);
     cursor.advance();
+
+    type(DISPATCH_ARGS);
+    expect<tokc::e::ENDSTMT>(DISPATCH_ARGS);
+  }> (DISPATCH_ARGS);
+}
+
+auto var_decl DISPATCH_FNSIG {
+  dive < 50, DISPATCH_LAM {
+    push_final(DISPATCH_ARGS);
 
     const auto must_infer_type = [&] -> bool {
       if (is<tokc::e::COLONASIGN>(cursor)) [[unlikely]] {
@@ -479,7 +517,7 @@ auto decl DISPATCH_FNSIG {
 
     if (is<tokc::e::ASIGN>(cursor)) {
       cursor.advance();
-      path<expr, {tokc::e::LPAREN, symetrical<tokc::e::LPAREN>}>(DISPATCH_ARGS);
+      expr(DISPATCH_ARGS);
     } else if (must_infer_type) {
       cursor.advance();
       if (is<tokc::e::ENDSTMT>(cursor)) {
@@ -493,14 +531,17 @@ auto decl DISPATCH_FNSIG {
   }
   > (DISPATCH_ARGS);
 }
-// } // namespace stmt
 
-const auto& id = path<1, expr, {tokc::e::COLON, decl}, {tokc::e::COLONASIGN, decl}>;
+auto decl DISPATCH_FNSIG {
+  BECOME path<2,var_decl, {tokc::e::BUILTIN_ALIAS, alias_decl}>(DISPATCH_ARGS);
+}
+const auto &id =
+    path<1, expr, {tokc::e::COLON, decl}, {tokc::e::COLONASIGN, var_decl}>;
 
 auto base DISPATCH_FNSIG {
   return path<expr,
               {tokc::e::ID, id},
-              {tokc::e::LPAREN, symetrical<tokc::e::LPAREN>},
+              {tokc::e::LPAREN, symetrical<base,tokc::e::LPAREN>},
               {tokc::e::BUILTIN_RETURN, DISPATCH_LAM{cursor.advance();dive<99,expr>(DISPATCH_ARGS);}}
               >(DISPATCH_ARGS);
 }
