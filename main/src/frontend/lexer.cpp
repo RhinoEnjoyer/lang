@@ -1,5 +1,5 @@
-#include "./lexer.hpp"
 #include "../become.hpp"
+#include "../token.hpp"
 
 #include <array>
 #include <cctype>
@@ -148,15 +148,15 @@ scan_for_symbol(llvm::StringRef src, pos_t pos) -> llvm::StringRef {
   return src.substr(0, pos);
 }
 
-[[clang::always_inline]] inline  auto
-skip_hwhitespace(llvm::StringRef src, pos_t &pos) -> void {
+[[clang::always_inline]] inline auto skip_hwhitespace(llvm::StringRef src,
+                                                      pos_t &pos) -> void {
   while (LLVM_LIKELY(pos < static_cast<pos_t>(src.size())) &&
          LLVM_UNLIKELY(src[pos] == ' ' || src[pos] == '\t'))
     ++pos;
 }
 namespace lex {
 [[clang::always_inline]] inline auto hwhitespace(llvm::StringRef src,
-                                                        pos_t &pos) -> void {
+                                                 pos_t &pos) -> void {
   skip_hwhitespace(src, pos);
 }
 [[clang::always_inline]] inline auto
@@ -215,8 +215,7 @@ auto err(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 }
 
 [[clang::noinline, clang::preserve_all]]
-auto err(const std::string_view s,
-                DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto err(const std::string_view s, DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   llvm::errs() << "Error: " << s << "\n\tPos:" << pos << '\n';
 
   std::exit(EXIT_FAILURE);
@@ -254,18 +253,25 @@ auto number(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   tokc::e type = tokc::e::INT;
   // bad for perfomance
   // maybe use a smaller dispatch table??
+  bool dot = false;
+AGAIN:
   if (LLVM_LIKELY(pos < src.size())) {
     if (src[pos] == '.') { /* float */
       ++pos;
       type = tokc::e::FLOAT;
       lex::number(src, pos);
-      if (LLVM_UNLIKELY(src[pos] == '.'))
+      if (LLVM_UNLIKELY(src[pos] == '.') || dot)
         return err("A float number can only have one dot", DISPATCH_ARGS);
+      dot = true;
+      goto AGAIN;
     } else if (src[pos] == '\'') { /* int */
-      do {
-        ++pos;
-        lex::number(src, pos);
-      } while (LLVM_UNLIKELY(src[pos] == '\''));
+      if (!dot)
+        type = tokc::e::INT;
+      // do {
+      ++pos;
+      lex::number(src, pos);
+      goto AGAIN;
+      // } while (LLVM_UNLIKELY(src[pos] == '\''));
     }
   }
 
@@ -294,7 +300,7 @@ auto number(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   lexer.push(type, bpos, pos);
   BECOME next(DISPATCH_ARGS);
 }
- auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   auto text = lex::symbol(src, pos);
   if (LLVM_UNLIKELY(text.size() == 0))
     return err("Symbol string needs to have symbols in it", DISPATCH_ARGS);
@@ -312,7 +318,7 @@ auto number(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   BECOME next(DISPATCH_ARGS);
 }
 
-template <auto &fn>  auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+template <auto &fn> auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   const tokc::e t = one_char_tok_lut[src[pos]];
   // CCHECK(LLVM_UNLIKELY(t == tokc::e::ERROR));
   fn(t, DISPATCH_ARGS);
@@ -336,7 +342,7 @@ template <auto &fn>  auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 
 namespace symetrical {
 
- auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   static constexpr auto fn = [](tokc::e r,
                                 DISPATCH_ARGS_DECL) constexpr -> void {
     lexer.openstack_.push_back(symetrical_table[src[pos]]);
@@ -346,7 +352,7 @@ namespace symetrical {
 }
 
 // add a recovery token so we can continiue lexing
- auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   static constexpr auto fn = [](tokc::e r,
                                 DISPATCH_ARGS_DECL) constexpr -> void {
     if (LLVM_UNLIKELY(lexer.openstack_.empty()))
@@ -361,7 +367,9 @@ namespace symetrical {
     // auto t = one_char_tok_lut[src[pos]];
     fn(one_char_tok_lut[src[pos]], DISPATCH_ARGS);
 
-    if (LLVM_UNLIKELY(!tokc::is_open_symetrical(lexer.buffer_.toks.back().type_ ) && lexer.buffer_.toks.back().type_ != tokc::ENDSTMT))
+    if (LLVM_UNLIKELY(
+            !tokc::is_open_symetrical(lexer.buffer_.toks.back().type_) &&
+            lexer.buffer_.toks.back().type_ != tokc::ENDSTMT))
       lexer.push(tokc::ENDSTMT, bpos, pos + 1);
 
     lexer.push(tokc::ENDGROUP, bpos, pos + 1);
@@ -482,7 +490,8 @@ auto lex_(const src_buffer_t *src) {
 
   dispatch::next(lexer, src->buffer(), 0, 0);
 
-  if(!tokc::is_open_symetrical(lexer.buffer_.toks.back().type_) && lexer.buffer_.toks.back().type_ != tokc::e::ENDSTMT)
+  if (!tokc::is_open_symetrical(lexer.buffer_.toks.back().type_) &&
+      lexer.buffer_.toks.back().type_ != tokc::e::ENDSTMT)
     lexer.push(tokc::e::ENDSTMT, 0, 0);
   lexer.push(tokc::e::ENDGROUP, 0, 0);
 

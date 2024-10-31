@@ -135,10 +135,10 @@ template <const tokc::e... type> auto expect(DISPATCH_ARGS_DECL) -> void {
     BECOME expected<type...>(DISPATCH_ARGS);
 }
 
-
-template <auto fallback_, auto args, std::size_t match_cursor_offset = 0>
- auto path DISPATCH_FNSIG {
-   // constexpr auto a = std::array<pair_t,args.size()>{args};
+template <auto args, fn_t fallback_ = nullptr,
+          std::size_t match_cursor_offset = 0>
+auto path DISPATCH_FNSIG {
+  // constexpr auto a = std::array<pair_t,args.size()>{args};
   // subhuman function
   constexpr auto dispatch_table = [] consteval -> auto {
     if constexpr (!std::is_constant_evaluated())
@@ -186,10 +186,10 @@ template <auto fallback_, auto args, std::size_t match_cursor_offset = 0>
 
   BECOME dispatch_table[(cursor + match_cursor_offset)->type_](toks, buffer,cursor);
 }
-template <auto args, std::size_t match_cursor_offset = 0>
- auto path DISPATCH_FNSIG {
-   BECOME path<nullptr,args,match_cursor_offset>(DISPATCH_ARGS);
- }
+// template <auto args, std::size_t match_cursor_offset = 0>
+//  auto path DISPATCH_FNSIG {
+//    BECOME path<nullptr,args,match_cursor_offset>(DISPATCH_ARGS);
+//  }
 
 auto base DISPATCH_FNSIG;
 
@@ -292,11 +292,11 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
     }
 
     do {
-      path <DISPATCH_LAM {std::cerr << "Invalid compound element" << '\n';std::abort();}
-      , make_set<pair_t{tokc::ID, push_final},
+      path < make_set<pair_t{tokc::ID, push_final},
                  pair_t{tokc::e::LPAREN, symetrical<base>},
                  pair_t{tokc::e::LBRACE, symetrical<expr>},
-                 pair_t{tokc::e::LCBRACE, symetrical<type<expr>>}>() >
+                 pair_t{tokc::e::LCBRACE, symetrical<type<expr>>}>(),
+                 DISPATCH_LAM {std::cerr << "Invalid compound element" << '\n';std::abort();} >
             (DISPATCH_ARGS);
 
       if (!is<tokc::e::DCOLON>(cursor)) [[unlikely]]
@@ -378,9 +378,9 @@ template <fn_t *const fallback, const int is_compound> auto type DISPATCH_FNSIG 
     std::size_t memento = buffer.size();
    
     if constexpr (dive_code == 99099) {
-      path<dive<99099,fallback>, args>(DISPATCH_ARGS);
+      path<args,dive<99099,fallback>>(DISPATCH_ARGS);
     }else {
-      path<nullptr,args>(DISPATCH_ARGS);
+      path<args,nullptr>(DISPATCH_ARGS);
     }
 
     const auto comp_lit = [&] {
@@ -404,28 +404,29 @@ template <fn_t *const fallback, const int is_compound> auto type DISPATCH_FNSIG 
     }
   };
 
-  /* This ain't the best way to do it */
-  impl.template operator()<type_table
-       // pair_t{tokc::e::ID, dive<99099,compound>},
-       // pair_t{tokc::e::BUILTIN_FN, dive<30,fn_sig>}, 
-       // pair_t{tokc::e::BUILTIN_REC, dive<30,advance2symetrical<665,decl>>},
-       // pair_t{tokc::e::BUILTIN_UNION, dive<30,advance2symetrical<666,decl>>},
-       // pair_t{tokc::e::BUILTIN_ENUM, placeholder},
-       // pair_t{tokc::e::BUILTIN_SCOPE, dive<30,push_final>}, 
-       // pair_t{tokc::e::BUILTIN_VECTOR, dive<30,advance2symetrical<669,expr>>},
-       // pair_t{tokc::e::BUILTIN_TYPEOF, dive<30,advance2symetrical<667,base>>}    
-    >(DISPATCH_ARGS);
+  impl.template operator()<type_table>(DISPATCH_ARGS);
 }
 
-/*
-  Need to do precedence
-  How?
-    No idea
-*/
+#define TOKEN_SYMBOL_SEQUENCE(SPELLING, CODE) pair_t{tokc::e::CODE, push_final},
+constexpr auto expr_table = make_set<
+    #include "../token.def"
+    pair_t{tokc::e::ID, compound}, 
+    pair_t{tokc::e::INT, push_final},
+    pair_t{tokc::e::FLOAT, push_final},
+    pair_t{tokc::e::LPAREN, symetrical<base>},
+    pair_t{tokc::e::BUILTIN_PIPE, push_final},
+    pair_t{tokc::e::BUILTIN_SET, advance2symetrical<12941, expr>},
+    pair_t{tokc::e::BUILTIN_SIZEOF, advance2symetrical<129491, type>},
+    pair_t{tokc::e::BUILTIN_DUCKLING, compound},
+    pair_t{tokc::e::BUILTIN_AS, as},
+    pair_t{tokc::e::BUILTIN_UNION, compound_literal},
+    pair_t{tokc::e::BUILTIN_REC, compound_literal},
+    pair_t{tokc::e::BUILTIN_VECTOR, compound_literal},
+    pair_t{tokc::e::BUILTIN_FN, compound_literal},
+    pair_t{tokc::e::BUILTIN_TYPEOF, compound_literal}>();
+
 auto expr DISPATCH_FNSIG {
 
-  #define TOKEN_SYMBOL_SEQUENCE(SPELLING,CODE)\
-    pair_t{tokc::e::CODE,push_final},
 
   if (is<tokc::e::ENDSTMT>(cursor)) [[unlikely]]{
     std::cerr << "Can't have empty expresions" << '\n';
@@ -433,20 +434,7 @@ auto expr DISPATCH_FNSIG {
   }
   dive < 40, DISPATCH_LAM {
     do {
-      path<make_set<
-           pair_t{tokc::e::ID, compound},
-           #include "../token.def"
-           pair_t{tokc::e::INT, push_final},
-           pair_t{tokc::e::FLOAT, push_final},
-           pair_t{tokc::e::LPAREN, symetrical<base>},
-           pair_t{tokc::e::BUILTIN_DUCKLING, compound},
-           pair_t{tokc::e::BUILTIN_AS, as},
-           pair_t{tokc::e::BUILTIN_UNION, compound_literal},
-           pair_t{tokc::e::BUILTIN_REC, compound_literal},
-           pair_t{tokc::e::BUILTIN_VECTOR, compound_literal},
-           pair_t{tokc::e::BUILTIN_TYPEOF, compound_literal},
-           pair_t{tokc::e::BUILTIN_FN, compound_literal}>()
-           >(DISPATCH_ARGS);
+      path<expr_table>(DISPATCH_ARGS);
     } while (LLVM_LIKELY(!is<tokc::e::ENDSTMT>(cursor)));
   }
   > (DISPATCH_ARGS);
@@ -515,16 +503,19 @@ auto var_decl DISPATCH_FNSIG {
 }
 
 auto decl DISPATCH_FNSIG {
-  BECOME path<var_decl, make_set<pair_t{tokc::e::BUILTIN_ALIAS, alias_decl}>(),2>(DISPATCH_ARGS);
+  BECOME path<make_set<pair_t{tokc::e::BUILTIN_ALIAS, alias_decl}>(),var_decl,2>(DISPATCH_ARGS);
 }
-const auto &id =
-    path<expr, make_set<pair_t{tokc::e::COLON, decl}, pair_t{tokc::e::COLONASIGN, var_decl}>(),1>;
+
+auto id DISPATCH_FNSIG {
+  BECOME path<make_set<pair_t{tokc::e::COLON, decl},
+                       pair_t{tokc::e::COLONASIGN, var_decl}>(),
+              expr, 1>(DISPATCH_ARGS);
+}
 
 auto base DISPATCH_FNSIG {
-  return path<expr,
-              make_set<{tokc::e::ID, id}, {tokc::e::LPAREN, symetrical<base>},
-                       {tokc::e::BUILTIN_RETURN, advance2<dive<99, expr>>}>()>(
-      DISPATCH_ARGS);
+  BECOME path<make_set<{tokc::e::ID, id}, {tokc::e::LPAREN, symetrical<base>},
+                       {tokc::e::BUILTIN_RETURN, advance2<dive<99, expr>>}>(),
+              expr>(DISPATCH_ARGS);
 }
 
 auto entry(const token_buffer_t& toks,cursor_t cursor, const cursor_t end) -> podlist_t<node_t> {
@@ -572,14 +563,14 @@ auto traverse_impl(token_buffer_t &buf, vec<node_t>::it &cursor,
                    }},
         cursor->node);
   }
+#undef space_str
+#undef print
 }
 
 auto traverse(token_buffer_t &buf, vec<node_t> &buffer, token_buffer_t &toks) {
   auto cursor = buffer.begin();
   return traverse_impl(buf, cursor, buffer.end(), 0);
 }
-#undef space_str
-#undef print
 #undef DISPATCH_LAM
 #undef DISPATCH_ARGS_DECL
 #undef DISPATCH_ARGS
