@@ -2,8 +2,8 @@
 
 EXEC_NAME="main"
 COMPLILER='clang++'
-FLAGS='-std=c++23 -fno-exceptions  -Wno-c++20-extensions -Wno-c++23-extensions'
-OLVL='-O3' 
+FLAGS='-std=c++23 -fno-exceptions  -Wno-c++20-extensions -Wno-c++23-extensions -flto'
+OLVL='-O2' 
 GLVL='-g0'
 LLVM_CONF='-lLLVM-18'
 # LLVM_CONF=`llvm-config --cxxflags --ldflags --libs --system-libs` #no exceptions no unwinding tables --std=C++17

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <llvm/Support/Compiler.h>
 #include <algorithm>
 #include <cstdlib>
@@ -9,32 +10,27 @@
 #include <type_traits>
 #include <utility>
 
-template <typename T>
-struct is_optional : std::false_type {};
-
-// Specialization: true only for std::optional<T>
-template <typename T>
-struct is_optional<std::optional<T>> : std::true_type {};
-
-/* Move only container,
- *  made for plain old data,
- *  needs to be manualy deallocated */
+/* Move only container
+ *  made for PODs
+ *  manualy allocated
+    manualy deallocated */
 template <typename T>
 struct podlist_t {
+  using len_t = std::uint64_t;
   T* begin_;
-  std::size_t len_;  // maybe use pointers? it is the same thing
-  std::size_t cap_;  // maybe use pointers? it is the same thing
+  len_t len_;  // maybe use pointers? it is the same thing
+  len_t cap_;  // maybe use pointers? it is the same thing
 
-  podlist_t(T* begin, std::size_t len, std::size_t cap)
+  podlist_t(T* begin, len_t len, len_t cap)
       : begin_(begin), len_(len), cap_(cap) {}
   podlist_t() : begin_(nullptr), len_(0), cap_(0) {}
 
-  constexpr static podlist_t create(const std::size_t cap) {
+  constexpr static podlist_t create(const len_t cap) {
     return podlist_t((T*)std::malloc(cap * sizeof(T)), 0, cap);
     // std::cout << __PRETTY_FUNCTION__ << " " << cap << std::endl;
   }
 
-  template <const std::size_t cap = 0>
+  template <const len_t cap = 0>
   static podlist_t create() {
     if constexpr (cap == 0) {
       return podlist_t{nullptr, 0, 0};
@@ -46,7 +42,7 @@ struct podlist_t {
 
   template <typename... Args>
   static podlist_t<T> make(Args&&... args) {
-    constexpr std::size_t cap = sizeof...(Args);
+    constexpr len_t cap = sizeof...(Args);
     auto p = podlist_t<T>::create(cap);
     p.append(std::move(args)...);
     return std::move(p);
@@ -54,7 +50,7 @@ struct podlist_t {
 
   template <typename... Args>
   static podlist_t<T> make_from_opt(Args&... args) {
-    constexpr std::size_t cap = sizeof...(Args) + 1;
+    constexpr len_t cap = sizeof...(Args) + 1;
     // auto p = podlist_t((T *)std::malloc(cap * sizeof(T)), 0, cap);
     auto p = podlist_t<T>::create<cap>();
     (
@@ -66,10 +62,10 @@ struct podlist_t {
     return std::move(p);
   }
 
-  T& at(std::size_t index) { return begin_[index]; }
-  const T& at(std::size_t index) const { return begin_[index]; }
+  T& at(len_t index) { return begin_[index]; }
+  const T& at(len_t index) const { return begin_[index]; }
 
-  void resize(const std::size_t newcap) {
+  void resize(const len_t newcap) {
     T* const re = static_cast<T*>(realloc(begin_, newcap * sizeof(T)));
     // if(re){
 
@@ -181,7 +177,7 @@ struct podlist_t {
   //   ++len_;
   // }
 
-  void regress(const std::size_t rlen) {
+  void regress(const len_t rlen) {
     if (len_ < rlen)
       return;
     len_ -= rlen;
@@ -248,7 +244,7 @@ struct podlist_t {
 
     pointer base() const { return ptr_; }
 
-    podlist_iterator_t& advance(std::size_t off = 1){
+    podlist_iterator_t& advance(len_t off = 1){
       ptr_ += off;
       return *this;
     }

@@ -87,6 +87,14 @@ struct node_t {
 using fn_t = auto DISPATCH_FNSIG;
 using pair_t = std::pair<tokc::e,fn_t*>;
 
+template <std::size_t N>
+using set_t = std::array<pair_t, N>;
+
+auto push_final(DISPATCH_ARGS_DECL) {
+  buffer.push_back(node_t::make(cursor));
+  cursor.advance();
+}
+
 template <node_t::median_t::code_t type, auto FN>
 auto dive(DISPATCH_ARGS_DECL) -> void {
   buffer.push_back(node_t::make(type, 0));
@@ -106,15 +114,6 @@ template <const tokc::e... type>
   return ((cursor->type_ == type) || ...);
 }
 
-// template <const auto type>
-// [[nodiscard]] auto is(cursor_t cursor){
-//   for(const auto& elm: type){
-//     if(elm == cursor->type_)
-//       return true;
-//   }
-//   return false;
-// }
-
 template <const tokc::e... type> auto expected(DISPATCH_ARGS_DECL) -> void {
   std::cerr << "Str: \'" << toks.str(cursor) << "\'"
             << "\n\tType: " << toks.str(cursor)
@@ -132,7 +131,7 @@ template <const tokc::e... type> auto expect(DISPATCH_ARGS_DECL) -> void {
     BECOME expected<type...>(DISPATCH_ARGS);
 }
 
-template <std::size_t match_cursor_offset, auto fallback_, std::pair<tokc::e, fn_t *>... args>
+template <std::size_t match_cursor_offset, auto fallback_, pair_t... args>
  auto path DISPATCH_FNSIG {
   // subhuman function
   constexpr auto dispatch_table = [] consteval -> auto {
@@ -140,7 +139,7 @@ template <std::size_t match_cursor_offset, auto fallback_, std::pair<tokc::e, fn
       static_assert(false, "Call table is not constructed on compile-time");
 
     constexpr auto arg_arr =
-        std::array<std::pair<tokc::e, fn_t *>, sizeof...(args)>{args...};
+        std::array<pair_t, sizeof...(args)>{args...};
 
     std::array<fn_t *, tokc::length()> table = {};
     auto fallback = [] consteval -> auto {
@@ -149,7 +148,7 @@ template <std::size_t match_cursor_offset, auto fallback_, std::pair<tokc::e, fn
       } else {
         return DISPATCH_LAM {
           constexpr auto m =
-              std::array<std::pair<tokc::e, fn_t *>, sizeof...(args)>{args...};
+              std::array<pair_t, sizeof...(args)>{args...};
 
           auto filter = [&] consteval -> auto {
             auto result = std::array<tokc::e, sizeof...(args)>{};
@@ -177,7 +176,7 @@ template <std::size_t match_cursor_offset, auto fallback_, std::pair<tokc::e, fn
     for (std::size_t i = 0; i < tokc::length(); i++)
       table[i] = fallback;
 
-    for (const std::pair<tokc::e, fn_t *> &pair : arg_arr)
+    for (const pair_t &pair : arg_arr)
       table[pair.first] = pair.second;
     return table;
   }();
@@ -190,31 +189,20 @@ auto path DISPATCH_FNSIG {
   BECOME path<0, fallback_, args...>(DISPATCH_ARGS);
 }
 
-template <std::size_t match_cursor_offset, std::pair<tokc::e, fn_t *>... args>
+template <std::size_t match_cursor_offset, pair_t... args>
 auto path DISPATCH_FNSIG {
   BECOME path<match_cursor_offset, nullptr, args...>(DISPATCH_ARGS);
 }
-template <std::pair<tokc::e, fn_t *>... args> auto path DISPATCH_FNSIG {
+template <pair_t... args> auto path DISPATCH_FNSIG {
   BECOME path<0, nullptr, args...>(DISPATCH_ARGS);
 }
 
 auto base DISPATCH_FNSIG;
 
-template <fn_t* fn, tokc::e type,
-          tokc::e group = tokc::symetrical_group(type)>
-auto symetrical DISPATCH_FNSIG {
-  static_assert(tokc::is_open_symetrical(type), "type template argument is not a symetrical");
-
-  cursor.advance();
-
-  if (is<tokc::ENDGROUP>(cursor)) [[unlikely]] {
-    cursor.advance();
-    return buffer.push_back(node_t::make(group, 0));
-  }
-
+template <fn_t *fn> auto symetrical_impl DISPATCH_FNSIG {
   dive < 10, DISPATCH_LAM {
     do {
-      //no fallback
+      // no fallback
       fn(DISPATCH_ARGS);
       expect<tokc::e::ENDSTMT>(DISPATCH_ARGS);
       cursor.advance();
@@ -222,13 +210,33 @@ auto symetrical DISPATCH_FNSIG {
     cursor.advance();
   }
   > (DISPATCH_ARGS);
-};
-
-template <tokc::e type, tokc::e group = tokc::symetrical_group(type)>
-auto symetrical DISPATCH_FNSIG {
-  BECOME symetrical<base, type, group>(DISPATCH_ARGS);
 }
 
+template <fn_t *fn> auto symetrical DISPATCH_FNSIG {
+  cursor.advance();
+  if (is<tokc::ENDGROUP>(cursor)) [[unlikely]] {
+    cursor.advance();
+    return buffer.push_back(node_t::make(10, 0));
+  }
+  symetrical_impl<fn>(DISPATCH_ARGS);
+};
+
+template <fn_t *fn, tokc::e type, tokc::e group>
+auto symetrical DISPATCH_FNSIG {
+  cursor.advance();
+  if (is<tokc::ENDGROUP>(cursor)) [[unlikely]] {
+    cursor.advance();
+    return buffer.push_back(node_t::make(group, 0));
+  }
+  BECOME symetrical_impl<fn>(DISPATCH_ARGS);
+};
+
+template <fn_t* fn, tokc::e type>
+auto symetrical DISPATCH_FNSIG {
+  static_assert(tokc::is_open_symetrical(type), "type template argument is not a symetrical");
+  expect<type>(DISPATCH_ARGS);
+  BECOME symetrical<fn,type,tokc::symetrical_group(type)>(DISPATCH_ARGS);
+}
 
 template<auto fn> auto advance2 DISPATCH_FNSIG{
   cursor.advance();
@@ -265,12 +273,12 @@ const auto &fn_sig = dive<20, DISPATCH_LAM {
   cursor.advance();
 
   if(is<tokc::e::LBRACE>(cursor)) [[unlikely]]
-    symetrical<expr, tokc::LBRACE>(DISPATCH_ARGS);
+    symetrical<expr>(DISPATCH_ARGS);
 
   if(is<tokc::e::LCBRACE>(cursor)) [[unlikely]]
-    symetrical<decl, tokc::LCBRACE>(DISPATCH_ARGS);
+    symetrical<decl>(DISPATCH_ARGS);
 
-  expect<tokc::LPAREN>(DISPATCH_ARGS);
+  // expect<tokc::LPAREN>(DISPATCH_ARGS);
   symetrical<decl, tokc::LPAREN>(DISPATCH_ARGS);
 
   expect<tokc::LPAREN>(DISPATCH_ARGS);
@@ -292,9 +300,9 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
     do {
       path <DISPATCH_LAM {std::cerr << "Invalid compound element" << '\n';std::abort();},
       {tokc::ID, DISPATCH_LAM{buffer.push_back(node_t::make(cursor));cursor.advance();}},
-      {tokc::e::LPAREN,  symetrical<tokc::LPAREN>},
-      {tokc::e::LBRACE,  symetrical<expr,tokc::LBRACE>},
-      {tokc::e::LCBRACE, symetrical<type<expr>,tokc::LCBRACE>}
+      {tokc::e::LPAREN,  symetrical<base>},
+      {tokc::e::LBRACE,  symetrical<expr>},
+      {tokc::e::LCBRACE, symetrical<type<expr>>}
       > (DISPATCH_ARGS);
 
     if (!is<tokc::e::DCOLON>(cursor)) [[unlikely]] 
@@ -304,14 +312,10 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
 }
 >;
 
-auto push_final(DISPATCH_ARGS_DECL) {
-  buffer.push_back(node_t::make(cursor));
-  cursor.advance();
-}
 
 
 constexpr auto combine_tables = [](auto a, auto b) constexpr -> auto {
-  auto table = std::array<std::pair<tokc::e,fn_t*>, a.size() + b.size()>{};
+  auto table = std::array<pair_t, a.size() + b.size()>{};
   std::uint64_t index = 0;
   for (std::uint64_t i = 0; i < a.size(); i++) {
     table[index] = a[i];
@@ -325,36 +329,17 @@ constexpr auto combine_tables = [](auto a, auto b) constexpr -> auto {
 
 };
 
-
-
-struct table_entry_t{
-  tokc::e type;
-  fn_t* fn;
-  const char* fn_name;
-
-  consteval static auto make(const tokc::e type, fn_t *fn,
-                             const char *fn_str) -> table_entry_t {
-    return {type, fn, fn_str};
-  };
-};
-
-#define table_entry_make(TYPE,FN)\
-  table_entry_t::make(TYPE,FN, #FN)
-
-
-
-
-
 constexpr auto aggregate_table = std::array{
   pair_t{tokc::e::BUILTIN_SCOPE, dive<30,push_final>}, 
   pair_t{tokc::e::BUILTIN_FN, dive<30,fn_sig>}, 
-
   pair_t{tokc::e::BUILTIN_REC, dive<30,advance2symetrical<665,decl>>},
   pair_t{tokc::e::BUILTIN_UNION, dive<30,advance2symetrical<666,decl>>},
   pair_t{tokc::e::BUILTIN_ENUM, dive<30,advance2symetrical<666,expr>>},
-  pair_t{tokc::e::BUILTIN_VECTOR, dive<30,advance2symetrical<669,expr>>},
-  pair_t{tokc::e::BUILTIN_TYPEOF, dive<30,advance2symetrical<667,base>>}
+  pair_t{tokc::e::BUILTIN_VECTOR, dive<30,advance2symetrical<669,type>>},
+  pair_t{tokc::e::BUILTIN_TYPEOF, dive<30,advance2symetrical<667,expr>>}
 };
+
+
 constexpr auto type_table = combine_tables(aggregate_table, std::array{pair_t{tokc::e::ID, dive<99099, compound>}});
 constexpr auto type_codes = [] consteval -> auto {
   auto table = std::array<tokc::e, type_table.size()>{tokc::e::ERROR};
@@ -403,33 +388,38 @@ template <fn_t *const fallback, const int is_compound> auto type DISPATCH_FNSIG 
     }else {
       path<nullptr,args...>(DISPATCH_ARGS);
     }
-    
+
+    const auto comp_lit = [&] {
+      cursor.advance();
+      buffer.at(memento).as_median().type_ = 2100219;
+
+      std::size_t memento2 = buffer.size();
+      dive<99099099, compound>(DISPATCH_ARGS);
+
+      buffer.at(memento).as_median().len_ +=
+          buffer.at(memento2).as_median().len_ + 1;
+    };
+
     if constexpr (is_compound >= 0){
       if constexpr (is_compound == 1)
         expect<tokc::e::DCOLON>(DISPATCH_ARGS);
-      
-      if(is<tokc::e::DCOLON>(cursor)){
-        cursor.advance();
-        buffer.at(memento).as_median().type_ = 2100219;
-
-        std::size_t memento2 = buffer.size();
-        dive<99099099, compound>(DISPATCH_ARGS);
-
-        buffer.at(memento).as_median().len_ += buffer.at(memento2).as_median().len_ + 1;
-      }
+      if constexpr (is_compound == 0)
+        if (!is<tokc::e::DCOLON>(cursor))
+          return;
+      comp_lit();
     }
   };
 
   /* This ain't the best way to do it */
   impl.template operator()<
-       {tokc::e::ID, dive<99099,compound>},
-       {tokc::e::BUILTIN_FN, dive<30,fn_sig>}, 
-       {tokc::e::BUILTIN_REC, dive<30,advance2symetrical<665,decl>>},
-       {tokc::e::BUILTIN_UNION, dive<30,advance2symetrical<666,decl>>},
-       {tokc::e::BUILTIN_ENUM, placeholder},
-       {tokc::e::BUILTIN_SCOPE, dive<30,push_final>}, 
-       {tokc::e::BUILTIN_VECTOR, dive<30,advance2symetrical<669,expr>>},
-       {tokc::e::BUILTIN_TYPEOF, dive<30,advance2symetrical<667,base>>}    
+       pair_t{tokc::e::ID, dive<99099,compound>},
+       pair_t{tokc::e::BUILTIN_FN, dive<30,fn_sig>}, 
+       pair_t{tokc::e::BUILTIN_REC, dive<30,advance2symetrical<665,decl>>},
+       pair_t{tokc::e::BUILTIN_UNION, dive<30,advance2symetrical<666,decl>>},
+       pair_t{tokc::e::BUILTIN_ENUM, placeholder},
+       pair_t{tokc::e::BUILTIN_SCOPE, dive<30,push_final>}, 
+       pair_t{tokc::e::BUILTIN_VECTOR, dive<30,advance2symetrical<669,expr>>},
+       pair_t{tokc::e::BUILTIN_TYPEOF, dive<30,advance2symetrical<667,base>>}    
     >(DISPATCH_ARGS);
 }
 
@@ -455,7 +445,7 @@ auto expr DISPATCH_FNSIG {
            {tokc::e::INT, push_final},
            {tokc::e::FLOAT, push_final},
 
-           {tokc::e::LPAREN, symetrical<tokc::e::LPAREN>},
+           {tokc::e::LPAREN, symetrical<base>},
            {tokc::e::BUILTIN_DUCKLING, compound},
            {tokc::e::BUILTIN_AS, as},
 
@@ -488,23 +478,23 @@ auto var_decl DISPATCH_FNSIG {
     push_final(DISPATCH_ARGS);
 
     const auto must_infer_type = [&] -> bool {
-      if (is<tokc::e::COLONASIGN>(cursor)) [[unlikely]] {
+      if (is<tokc::e::COLONASIGN>(cursor)) [[unlikely]]
         return true;
-      }
       cursor.advance();
 
-      if (is<tokc::e::ENDSTMT>(cursor)) [[unlikely]] {
-        std::cerr
-            << "Can't have a declaration without a type and without a value"
-            << '\n';
-        std::abort();
-      }
-
+      if (is<tokc::e::ENDSTMT>(cursor)) [[unlikely]] 
+        expected<tokc::ENDSTMT>(DISPATCH_ARGS);
       if (is<tokc::e::BUILTIN_MUTABLE, tokc::e::BUILTIN_IMMUTABLE>(cursor))
           [[unlikely]] {
         buffer.push_back(node_t::make(cursor));
         cursor.advance();
       }
+
+      //Attributes
+      if(is<tokc::e::BUILTIN_DUCKLING>(cursor)){
+        advance2symetrical<10>(DISPATCH_ARGS);
+      }
+        
 
       if (is<tokc::e::ASIGN, tokc::e::ENDSTMT>(cursor)) [[unlikely]] {
         return true;
@@ -541,7 +531,7 @@ const auto &id =
 auto base DISPATCH_FNSIG {
   return path<expr,
               {tokc::e::ID, id},
-              {tokc::e::LPAREN, symetrical<base,tokc::e::LPAREN>},
+              {tokc::e::LPAREN, symetrical<base>},
               {tokc::e::BUILTIN_RETURN, DISPATCH_LAM{cursor.advance();dive<99,expr>(DISPATCH_ARGS);}}
               >(DISPATCH_ARGS);
 }
