@@ -427,25 +427,30 @@ auto sequence DISPATCH_FNSIG{
 }
 
 
+
+constexpr auto& if_ctrl_stmt =
+               dive<20202,sequence<
+                 symetrical<expr>, symetrical<base,tokc::e::LCBRACE>>
+                >;
 auto if_else_path DISPATCH_FNSIG{
   static constexpr auto elif_pair =
-      pair_t{tokc::e::LPAREN,
-             sequence<dive<20202, sequence<symetrical<expr,tokc::e::LPAREN>, symetrical<base,tokc::e::LCBRACE>>>,
-                      if_else_path>};
+      pair_t{tokc::e::LPAREN,sequence<if_ctrl_stmt,if_else_path>};
+
   static constexpr auto el_pair = pair_t{tokc::e::LCBRACE, symetrical<base>};
   static constexpr auto set = make_set<elif_pair, el_pair>();
   BECOME path<set,DISPATCH_LAM{}>(DISPATCH_ARGS);
 }
 
 auto if_ DISPATCH_FNSIG {
+  BECOME dive<5000,DISPATCH_LAM{
   cursor.advance();
-  symetrical<expr>(DISPATCH_ARGS);
-  symetrical<base>(DISPATCH_ARGS);
+  if_ctrl_stmt(DISPATCH_ARGS);
 
-  if(!is<tokc::e::LPAREN>(cursor))
+  if(!is<tokc::e::LPAREN, tokc::e::LCBRACE>(cursor))
     return;
 
-  BECOME if_else_path(DISPATCH_ARGS);
+  if_else_path(DISPATCH_ARGS);
+  }>(DISPATCH_ARGS);
 }
 
 #define TOKEN_SYMBOL_SEQUENCE(SPELLING, CODE) pair_t{tokc::e::CODE, push_final},
