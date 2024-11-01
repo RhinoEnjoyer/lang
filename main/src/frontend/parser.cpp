@@ -10,19 +10,6 @@
 #include <variant>
 
 
-/*
-  So far so good 
-  using variadric arguments might have been a good idea at first 
-  but it turned out kindof limiting
-
-  It should be best to replace all the varidaric templates with 
-  a more concrete type like a array of something, it will require some tweeking
-  but it should improve clarity, reduce copy pasting and keeping track of multiple path configurations
-  π.χ {tokc::e::BUILTIN_VECTOR,vector}....(on another function) {tokc::e::BUILTIN_VECTOR,advance2<...>(...)}
-  and will set a foundation for a more consistent methodology
-*/
-
-
 namespace parser {
 
 using cursor_t = vec<token_t>::c_it;
@@ -215,21 +202,27 @@ template <fn_t *fn> auto symetrical DISPATCH_FNSIG {
   symetrical_impl<fn>(DISPATCH_ARGS);
 };
 
-template <fn_t *fn, tokc::e type, tokc::e group>
-auto symetrical DISPATCH_FNSIG {
-  cursor.advance();
-  if (is<tokc::ENDGROUP>(cursor)) [[unlikely]] {
-    cursor.advance();
-    return buffer.push_back(node_t::make(group, 0));
-  }
-  BECOME symetrical_impl<fn>(DISPATCH_ARGS);
-};
+// template <fn_t *fn, tokc::e type, tokc::e group>
+// auto symetrical DISPATCH_FNSIG {
+//   cursor.advance();
+//   if (is<tokc::ENDGROUP>(cursor)) [[unlikely]] {
+//     cursor.advance();
+//     return buffer.push_back(node_t::make(group, 0));
+//   }
+//   BECOME symetrical_impl<fn>(DISPATCH_ARGS);
+// };
 
 template <fn_t* fn, tokc::e type>
 auto symetrical DISPATCH_FNSIG {
   static_assert(tokc::is_open_symetrical(type), "type template argument is not a symetrical");
   expect<type>(DISPATCH_ARGS);
-  BECOME symetrical<fn,type,tokc::symetrical_group(type)>(DISPATCH_ARGS);
+  cursor.advance();
+    if (is<tokc::ENDGROUP>(cursor)) [[unlikely]] {
+      cursor.advance();
+      return buffer.push_back(node_t::make(10, 0));
+    }
+
+  BECOME symetrical_impl<fn>(DISPATCH_ARGS);
 }
 
 template<auto fn> auto advance2 DISPATCH_FNSIG{
@@ -292,20 +285,36 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
     }
 
     do {
-      path < make_set<pair_t{tokc::ID, push_final},
-                 pair_t{tokc::e::LPAREN, symetrical<base>},
-                 pair_t{tokc::e::LBRACE, symetrical<expr>},
-                 pair_t{tokc::e::LCBRACE, symetrical<type<expr>>}>(),
-                 DISPATCH_LAM {std::cerr << "Invalid compound element" << '\n';std::abort();} >
+      path < make_set<pair_t{tokc::ID, push_final}>(),DISPATCH_LAM {std::cerr << "Invalid compound element" << '\n';std::abort();} >
             (DISPATCH_ARGS);
+                 // pair_t{tokc::e::LPAREN, symetrical<base>},
+                 // pair_t{tokc::e::LBRACE, symetrical<expr>},
+                 // pair_t{tokc::e::LCBRACE, symetrical<type<expr>>}
 
-      if (!is<tokc::e::DCOLON>(cursor)) [[unlikely]]
-        break;
-      cursor.advance();
-  }while (true);
+      // if (!is<tokc::e::DCOLON>(cursor)) [[unlikely]]{
+      //   break;
+      // }
+      // cursor.advance();
+    AGAIN:
+      if (is<tokc::e::DCOLON>(cursor)) [[unlikely]] {
+        cursor.advance();
+      } else {
+        if (is<tokc::e::LPAREN, tokc::e::LBRACE, tokc::e::LCBRACE>(cursor)) {
+          path<make_set<pair_t{tokc::e::LPAREN, symetrical<base>},
+                        pair_t{tokc::e::LBRACE, symetrical<expr>},
+                        pair_t{tokc::e::LCBRACE, symetrical<type<expr>>}>()>(
+              DISPATCH_ARGS);
+          goto AGAIN;
+          // if (!is<tokc::e::DCOLON>(cursor)) [[unlikely]]
+          //   break;
+          // cursor.advance();
+        } else {
+          break;
+        }
+      }
+    } while (true);
 }
 >;
-
 
 
 constexpr auto merge_tables = [](auto a, auto b) constexpr -> auto {
@@ -407,6 +416,38 @@ template <fn_t *const fallback, const int is_compound> auto type DISPATCH_FNSIG 
   impl.template operator()<type_table>(DISPATCH_ARGS);
 }
 
+template<fn_t* fn, fn_t*... fns>
+auto sequence DISPATCH_FNSIG{
+  fn(DISPATCH_ARGS);
+
+  if constexpr (sizeof...(fns) > 0)
+    BECOME sequence<fns...>(DISPATCH_ARGS);
+  else
+    return;
+}
+
+
+auto if_else_path DISPATCH_FNSIG{
+  static constexpr auto elif_pair =
+      pair_t{tokc::e::LPAREN,
+             sequence<dive<20202, sequence<symetrical<expr,tokc::e::LPAREN>, symetrical<base,tokc::e::LCBRACE>>>,
+                      if_else_path>};
+  static constexpr auto el_pair = pair_t{tokc::e::LCBRACE, symetrical<base>};
+  static constexpr auto set = make_set<elif_pair, el_pair>();
+  BECOME path<set,DISPATCH_LAM{}>(DISPATCH_ARGS);
+}
+
+auto if_ DISPATCH_FNSIG {
+  cursor.advance();
+  symetrical<expr>(DISPATCH_ARGS);
+  symetrical<base>(DISPATCH_ARGS);
+
+  if(!is<tokc::e::LPAREN>(cursor))
+    return;
+
+  BECOME if_else_path(DISPATCH_ARGS);
+}
+
 #define TOKEN_SYMBOL_SEQUENCE(SPELLING, CODE) pair_t{tokc::e::CODE, push_final},
 constexpr auto expr_table = make_set<
     #include "../token.def"
@@ -414,6 +455,7 @@ constexpr auto expr_table = make_set<
     pair_t{tokc::e::INT, push_final},
     pair_t{tokc::e::FLOAT, push_final},
     pair_t{tokc::e::LPAREN, symetrical<base>},
+    pair_t{tokc::e::BUILTIN_IF, if_},
     pair_t{tokc::e::BUILTIN_PIPE, push_final},
     pair_t{tokc::e::BUILTIN_SET, advance2symetrical<12941, expr>},
     pair_t{tokc::e::BUILTIN_SIZEOF, advance2symetrical<129491, type>},
