@@ -427,11 +427,8 @@ auto sequence DISPATCH_FNSIG{
 }
 
 
-
-constexpr auto& if_ctrl_stmt =
-               dive<20202,sequence<
-                 symetrical<expr>, symetrical<base,tokc::e::LCBRACE>>
-                >;
+namespace if_stmt{
+static constexpr auto& if_ctrl_stmt = dive<20202,sequence<symetrical<expr>, symetrical<base,tokc::e::LCBRACE>>>;
 auto if_else_path DISPATCH_FNSIG{
   static constexpr auto elif_pair =
       pair_t{tokc::e::LPAREN,sequence<if_ctrl_stmt,if_else_path>};
@@ -441,7 +438,7 @@ auto if_else_path DISPATCH_FNSIG{
   BECOME path<set,DISPATCH_LAM{}>(DISPATCH_ARGS);
 }
 
-auto if_ DISPATCH_FNSIG {
+auto fn DISPATCH_FNSIG {
   BECOME dive<5000,DISPATCH_LAM{
   cursor.advance();
   if_ctrl_stmt(DISPATCH_ARGS);
@@ -452,6 +449,7 @@ auto if_ DISPATCH_FNSIG {
   if_else_path(DISPATCH_ARGS);
   }>(DISPATCH_ARGS);
 }
+} // namespace if_stmt
 
 #define TOKEN_SYMBOL_SEQUENCE(SPELLING, CODE) pair_t{tokc::e::CODE, push_final},
 constexpr auto expr_table = make_set<
@@ -460,7 +458,7 @@ constexpr auto expr_table = make_set<
     pair_t{tokc::e::INT, push_final},
     pair_t{tokc::e::FLOAT, push_final},
     pair_t{tokc::e::LPAREN, symetrical<base>},
-    pair_t{tokc::e::BUILTIN_IF, if_},
+    pair_t{tokc::e::BUILTIN_IF, if_stmt::fn},
     pair_t{tokc::e::BUILTIN_PIPE, push_final},
     pair_t{tokc::e::BUILTIN_SET, advance2symetrical<12941, expr>},
     pair_t{tokc::e::BUILTIN_SIZEOF, advance2symetrical<129491, type>},
