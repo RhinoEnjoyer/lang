@@ -75,13 +75,36 @@ using fn_t = auto DISPATCH_FNSIG;
 using pair_t = std::pair<tokc::e,fn_t*>;
 
 template <std::size_t N>
-using set_t = std::array<pair_t, N>;
+using table_t = std::array<pair_t, N>;
 
-
-
-template<typename ...T> consteval auto make_set(T... args) -> auto {
-  return set_t<sizeof...(args)>{args...};
+template<typename ...T> consteval auto make_table(T... args) -> auto {
+  return table_t<sizeof...(args)>{args...};
 }
+consteval auto get_toks(const auto t) {
+  std::array<tokc::e, t.size()> table;
+  std::transform(t.begin(), t.end(), table.begin(),
+                 [](const auto &p) { return p.first; });
+  return table;
+}
+consteval auto get_fns(const auto &t) {
+  std::array<fn_t*, t.size()> table;
+  std::transform(t.begin(), t.end(), table.begin(),
+                 [](const auto &p) { return p.second; });
+  return table;
+}
+consteval auto merge_tables(auto a, auto b) -> auto {
+  auto table = std::array<pair_t, a.size() + b.size()>{};
+  std::uint64_t index = 0;
+  for (std::uint64_t i = 0; i < a.size(); i++) {
+    table[index] = a[i];
+    index++;
+  }
+  for (std::uint64_t i = 0; i < b.size(); i++) {
+    table[index] = b[i];
+    index++;
+  }
+  return table;
+};
 
 auto push_final(DISPATCH_ARGS_DECL) {
   buffer.push_back(node_t::make(cursor));
@@ -102,9 +125,15 @@ auto dive(DISPATCH_ARGS_DECL) -> void {
 
 template <typename... T> using tup = std::tuple<T...>;
 
-template <const tokc::e... type>
-[[nodiscard]] inline auto is(auto cursor) -> bool {
-  return ((cursor->type_ == type) || ...);
+template <std::array type>
+[[nodiscard]] inline auto is(cursor_t cursor) -> bool {
+  return std::apply(
+      [&](auto... elems) { return ((cursor->type_ == elems) || ...); }, type);
+}
+template <tokc::e... type>
+[[nodiscard]] inline auto is(cursor_t cursor) -> bool {
+  // return cursor->type_ == type;
+  BECOME is<std::array{type...}>(cursor);
 }
 
 template <const tokc::e... type> auto expected(DISPATCH_ARGS_DECL) -> void {
@@ -287,7 +316,7 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
     }
 
     do {
-      path < make_set(pair_t{tokc::ID, push_final}),DISPATCH_LAM {std::cerr << "Invalid compound element" << '\n';std::abort();} >
+      path < make_table(pair_t{tokc::ID, push_final}),DISPATCH_LAM {std::cerr << "Invalid compound element" << '\n';std::abort();} >
             (DISPATCH_ARGS);
                  // pair_t{tokc::e::LPAREN, symetrical<base>},
                  // pair_t{tokc::e::LBRACE, symetrical<expr>},
@@ -301,11 +330,11 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
       if (is<tokc::e::DCOLON>(cursor)) [[unlikely]] {
         cursor.advance();
       } else {
-        if (is<tokc::e::LPAREN, tokc::e::LBRACE, tokc::e::LCBRACE>(cursor)) {
-          path<make_set(pair_t{tokc::e::LPAREN, symetrical<base>},
+        constexpr auto table = make_table(pair_t{tokc::e::LPAREN, symetrical<base>},
                         pair_t{tokc::e::LBRACE, symetrical<expr>},
-                        pair_t{tokc::e::LCBRACE, symetrical<type<expr>>})>(
-              DISPATCH_ARGS);
+                        pair_t{tokc::e::LCBRACE, symetrical<type<expr>>});
+        if (is<get_toks(table)>(cursor)) {
+          path<table>(DISPATCH_ARGS);
           goto AGAIN;
           // if (!is<tokc::e::DCOLON>(cursor)) [[unlikely]]
           //   break;
@@ -318,46 +347,56 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
 }
 >;
 
+auto collection_impl DISPATCH_FNSIG {
+  expect<tokc::e::ID>(DISPATCH_ARGS);
+  push_final(DISPATCH_ARGS);
+  expect<tokc::e::COLON>(DISPATCH_ARGS);
+  cursor.advance();
+  BECOME type(DISPATCH_ARGS);
+}
 
-constexpr auto merge_tables = [](auto a, auto b) constexpr -> auto {
-  auto table = std::array<pair_t, a.size() + b.size()>{};
-  std::uint64_t index = 0;
-  for (std::uint64_t i = 0; i < a.size(); i++) {
-    table[index] = a[i];
-    index++;
-  }
-  for (std::uint64_t i = 0; i < b.size(); i++) {
-    table[index] = b[i];
-    index++;
-  }
-  return table;
+auto enum_impl DISPATCH_FNSIG {
+  expect<tokc::e::ID>(DISPATCH_ARGS);
+  push_final(DISPATCH_ARGS);
+  expect<tokc::e::COLON>(DISPATCH_ARGS);
+  cursor.advance();
+  BECOME expr(DISPATCH_ARGS);
+}
 
-};
+template<fn_t* elm>
+auto aggregate_decl_pat DISPATCH_FNSIG{
+  cursor.advance();
+  if(is<tokc::e::LCBRACE>(cursor))
+    symetrical<decl>(DISPATCH_ARGS);
+  BECOME symetrical<elm,tokc::e::LPAREN>(DISPATCH_ARGS);
+}
 
-constexpr auto aggregate_table = make_set(
-  pair_t{tokc::e::BUILTIN_SCOPE, dive<30,push_final>}, 
-  pair_t{tokc::e::BUILTIN_FN, dive<30,fn_sig>}, 
-  pair_t{tokc::e::BUILTIN_REC, dive<30,advance2symetrical<665,decl>>},
-  pair_t{tokc::e::BUILTIN_UNION, dive<30,advance2symetrical<666,decl>>},
-  pair_t{tokc::e::BUILTIN_ENUM, dive<30,advance2symetrical<666,expr>>},
-  pair_t{tokc::e::BUILTIN_VECTOR, dive<30,advance2symetrical<669,type>>},
-  pair_t{tokc::e::BUILTIN_TYPEOF, dive<30,advance2symetrical<667,expr>>}
-);
 
-constexpr auto type_table = merge_tables(aggregate_table, make_set(pair_t{tokc::e::ID, dive<99099, compound>}));
+// constexpr auto aggregate_table = make_table(
+//     pair_t{tokc::e::BUILTIN_COLLECTION, dive<30, advance2symetrical<665, collection_impl>>},
+//     pair_t{tokc::e::BUILTIN_REC, dive<30, advance2symetrical<665, decl>>},
+//     pair_t{tokc::e::BUILTIN_UNION, dive<30, advance2symetrical<666, decl>>},
+//     pair_t{tokc::e::BUILTIN_ENUM, dive<30, advance2symetrical<666, enum_impl>>});
+constexpr auto aggregate_table = make_table(
+    pair_t{tokc::e::BUILTIN_COLLECTION, dive<30, dive<665,aggregate_decl_pat<collection_impl>>>},
+    pair_t{tokc::e::BUILTIN_REC, dive<30, dive<666,aggregate_decl_pat<decl>>>},
+    pair_t{tokc::e::BUILTIN_UNION, dive<30, dive<667,aggregate_decl_pat<decl>>>},
+    pair_t{tokc::e::BUILTIN_ENUM, dive<30, dive<668,aggregate_decl_pat<enum_impl>>>});
 
-constexpr auto type_codes = [] consteval -> auto {
-  auto table = std::array<tokc::e, type_table.size()>{tokc::e::ERROR};
-  std::transform(type_table.begin(), type_table.end(), table.begin(),
-                 [](const auto &pair) { return pair.first; });
-  return table;
-}();
-constexpr auto type_fn = [] consteval -> auto {
-  auto table = std::array<fn_t*, type_table.size()>{nullptr};
-  std::transform(type_table.begin(), type_table.end(), table.begin(),
-                 [](const auto &pair) { return pair.second; });
-  return table;
-}();
+constexpr auto type_table = merge_tables(
+    aggregate_table,
+    make_table(
+        pair_t{tokc::e::BUILTIN_VECTOR,
+               dive<30, advance2symetrical<669, type>>},
+        pair_t{tokc::e::BUILTIN_TYPEOF,
+               dive<30, advance2symetrical<667, expr>>},
+        pair_t{tokc::e::BUILTIN_FN, dive<30, fn_sig>},
+        pair_t{tokc::e::BUILTIN_SCOPE, dive<30, push_final>},
+        pair_t{tokc::e::BUILTIN_TYPE,
+               dive<30, push_final>}, // find the contexts where this is valid
+                                      // and make sure to add this path to the
+                                      // decl function. For now this works
+        pair_t{tokc::e::ID, dive<99099, compound>}));
 
 auto get_index(vec<node_t>& buffer) -> std::uint64_t{
   return buffer.size();
@@ -415,6 +454,20 @@ template <fn_t *const fallback, const int is_compound> auto type DISPATCH_FNSIG 
     }
   };
 
+  /*
+    I have made a big mistake on the lexer that I didn't think would fuck me this hard
+    when I read symbols I find a first char and then read from there till the end of contnious symbols
+    (of the same type) so +++ is one symbol so  A+++B is not A++ + B but A+++ B which is invalid
+    here this happens but with ^ and ~
+  */
+  //prefix
+  static constexpr auto table =
+      make_table(pair_t{tokc::e::CARET, push_final},
+               pair_t{tokc::e::PERISPOMENI, push_final},
+               pair_t{tokc::e::LBRACE, symetrical<expr>});
+  while (is<get_toks(table)>(cursor)) {
+    path<table>(DISPATCH_ARGS);
+    };
   impl.template operator()<type_table>(DISPATCH_ARGS);
 }
 
@@ -436,7 +489,7 @@ auto if_else_path DISPATCH_FNSIG{
       pair_t{tokc::e::LPAREN,sequence<if_ctrl_stmt,if_else_path>};
 
   static constexpr auto el_pair = pair_t{tokc::e::LCBRACE, symetrical<base>};
-  static constexpr auto set = make_set(elif_pair, el_pair);
+  static constexpr auto set = make_table(elif_pair, el_pair);
   BECOME path<set,DISPATCH_LAM{}>(DISPATCH_ARGS);
 }
 
@@ -454,11 +507,13 @@ auto fn DISPATCH_FNSIG {
 } // namespace if_stmt
 
 #define TOKEN_SYMBOL_SEQUENCE(SPELLING, CODE) pair_t{tokc::e::CODE, push_final},
-constexpr auto expr_table = make_set(
+constexpr auto expr_table = make_table(
     #include "../token.def"
     pair_t{tokc::e::ID, compound}, 
     pair_t{tokc::e::INT, push_final},
     pair_t{tokc::e::FLOAT, push_final},
+    pair_t{tokc::e::BUILTIN_NULL, push_final},
+    pair_t{tokc::e::BUILTIN_ZERONULL, push_final}, //migth be useless
     pair_t{tokc::e::LPAREN, symetrical<base>},
     pair_t{tokc::e::BUILTIN_IF, if_stmt::fn},
     pair_t{tokc::e::BUILTIN_PIPE, push_final},
@@ -523,7 +578,7 @@ auto var_decl DISPATCH_FNSIG {
       }
         
 
-      if (is<tokc::e::ASIGN, tokc::e::ENDSTMT>(cursor)) [[unlikely]] {
+      if (is<{tokc::e::ASIGN, tokc::e::ENDSTMT}>(cursor)) [[unlikely]] {
         return true;
       }
 
@@ -550,18 +605,18 @@ auto var_decl DISPATCH_FNSIG {
 }
 
 auto decl DISPATCH_FNSIG {
-  BECOME path<make_set(pair_t{tokc::e::BUILTIN_ALIAS, alias_decl}),var_decl,2>(DISPATCH_ARGS);
+  BECOME path<make_table(pair_t{tokc::e::BUILTIN_ALIAS, alias_decl}),var_decl,2>(DISPATCH_ARGS);
 }
 
 auto id DISPATCH_FNSIG {
-  BECOME path<make_set(pair_t{tokc::e::COLON, decl},
+  BECOME path<make_table(pair_t{tokc::e::COLON, decl},
                        pair_t{tokc::e::COLONASIGN, var_decl}),
               expr, 1>(DISPATCH_ARGS);
 }
 
 auto base DISPATCH_FNSIG {
   BECOME
-      path<make_set(pair_t{tokc::e::ID, id},
+      path<make_table(pair_t{tokc::e::ID, id},
                     pair_t{tokc::e::LPAREN, symetrical<base>},
                     pair_t{tokc::e::BUILTIN_RETURN, advance2<dive<99, expr>>}),
            expr>(DISPATCH_ARGS);

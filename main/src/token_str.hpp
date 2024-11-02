@@ -1,8 +1,9 @@
 #pragma once
 #include "./token_enum.hpp"
 #include <string>
+#include <string_view>
 
-static inline std::string token_code_str(const tokc::e tok) {
+constexpr inline std::string_view token_code_str(const tokc::e tok) {
   switch (tok) {
 #define TOKEN_VIRTUAL(code)                                                    \
   case tokc::e::code:                                                             \
