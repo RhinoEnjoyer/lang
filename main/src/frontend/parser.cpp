@@ -110,6 +110,7 @@ auto push_final(DISPATCH_ARGS_DECL) {
   buffer.push_back(node_t::make(cursor));
   cursor.advance();
 }
+auto advance(DISPATCH_ARGS_DECL) {cursor.advance();}
 
 template <node_t::median_t::code_t type, auto FN>
 auto dive(DISPATCH_ARGS_DECL) -> void {
@@ -209,6 +210,15 @@ auto path DISPATCH_FNSIG {
 //    BECOME path<nullptr,args,match_cursor_offset>(DISPATCH_ARGS);
 //  }
 
+template<fn_t* fn, fn_t*... fns>
+auto sequence DISPATCH_FNSIG{
+  fn(DISPATCH_ARGS);
+
+  if constexpr (sizeof...(fns) > 0)
+    BECOME sequence<fns...>(DISPATCH_ARGS);
+  else
+    return;
+}
 auto base DISPATCH_FNSIG;
 
 template <fn_t *fn> auto symetrical_impl DISPATCH_FNSIG {
@@ -232,6 +242,7 @@ template <fn_t *fn> auto symetrical DISPATCH_FNSIG {
   }
   symetrical_impl<fn>(DISPATCH_ARGS);
 };
+
 
 // template <fn_t *fn, tokc::e type, tokc::e group>
 // auto symetrical DISPATCH_FNSIG {
@@ -363,11 +374,15 @@ auto enum_impl DISPATCH_FNSIG {
   BECOME expr(DISPATCH_ARGS);
 }
 
+auto comptime_arglist DISPATCH_FNSIG {
+  if (is<tokc::e::LCBRACE>(cursor))
+    symetrical<decl>(DISPATCH_ARGS);
+}
+
 template<fn_t* elm>
 auto aggregate_decl_pat DISPATCH_FNSIG{
   cursor.advance();
-  if(is<tokc::e::LCBRACE>(cursor))
-    symetrical<decl>(DISPATCH_ARGS);
+  comptime_arglist(DISPATCH_ARGS);
   BECOME symetrical<elm,tokc::e::LPAREN>(DISPATCH_ARGS);
 }
 
@@ -385,18 +400,16 @@ constexpr auto aggregate_table = make_table(
 
 constexpr auto type_table = merge_tables(
     aggregate_table,
-    make_table(
-        pair_t{tokc::e::BUILTIN_VECTOR,
-               dive<30, advance2symetrical<669, type>>},
-        pair_t{tokc::e::BUILTIN_TYPEOF,
-               dive<30, advance2symetrical<667, expr>>},
-        pair_t{tokc::e::BUILTIN_FN, dive<30, fn_sig>},
-        pair_t{tokc::e::BUILTIN_SCOPE, dive<30, push_final>},
-        pair_t{tokc::e::BUILTIN_TYPE,
-               dive<30, push_final>}, // find the contexts where this is valid
-                                      // and make sure to add this path to the
-                                      // decl function. For now this works
-        pair_t{tokc::e::ID, dive<99099, compound>}));
+    make_table(pair_t{tokc::e::BUILTIN_VECTOR,dive<30, advance2symetrical<669, type>>},
+               pair_t{tokc::e::BUILTIN_TYPEOF,dive<30, advance2symetrical<667, expr>>},
+               pair_t{tokc::e::BUILTIN_FN, dive<30, fn_sig>},
+               pair_t{tokc::e::BUILTIN_SCOPE,dive<30, sequence<advance, comptime_arglist>>},
+
+                 // find the contexts where this is valid
+                 // and make sure to add this path to the
+                 // decl function. For now this works
+               pair_t{tokc::e::BUILTIN_TYPE,dive<30, push_final>}, 
+               pair_t{tokc::e::ID, dive<99099, compound>}));
 
 auto get_index(vec<node_t>& buffer) -> std::uint64_t{
   return buffer.size();
@@ -463,23 +476,14 @@ template <fn_t *const fallback, const int is_compound> auto type DISPATCH_FNSIG 
   //prefix
   static constexpr auto table =
       make_table(pair_t{tokc::e::CARET, push_final},
-               pair_t{tokc::e::PERISPOMENI, push_final},
-               pair_t{tokc::e::LBRACE, symetrical<expr>});
+                 pair_t{tokc::e::PERISPOMENI, push_final},
+                 pair_t{tokc::e::LBRACE, symetrical<expr>});
   while (is<get_toks(table)>(cursor)) {
     path<table>(DISPATCH_ARGS);
     };
   impl.template operator()<type_table>(DISPATCH_ARGS);
 }
 
-template<fn_t* fn, fn_t*... fns>
-auto sequence DISPATCH_FNSIG{
-  fn(DISPATCH_ARGS);
-
-  if constexpr (sizeof...(fns) > 0)
-    BECOME sequence<fns...>(DISPATCH_ARGS);
-  else
-    return;
-}
 
 
 namespace if_stmt{
