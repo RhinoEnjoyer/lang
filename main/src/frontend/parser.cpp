@@ -23,6 +23,7 @@ struct node_t {
     code_t type_;
     std::int32_t len_;
   };
+
   struct err_t {
     std::int32_t index_;
   };
@@ -30,39 +31,21 @@ struct node_t {
   using node_var_t = std::variant<final_t, median_t, err_t>;
   node_var_t node;
 
-  [[nodiscard]] auto as_median() -> median_t & {
-    return std::get<median_t>(node);
-  }
+  [[nodiscard]] auto as_median() -> median_t & { return std::get<median_t>(node); }
   [[nodiscard]] auto as_final() -> final_t & { return std::get<final_t>(node); }
   [[nodiscard]] auto as_err() -> err_t & { return std::get<err_t>(node); }
 
-  [[nodiscard]] auto as_median() const -> const median_t & {
-    return std::get<median_t>(node);
-  }
-  [[nodiscard]] auto as_final() const -> const final_t & {
-    return std::get<final_t>(node);
-  }
-  [[nodiscard]] auto as_err() const -> const err_t & {
-    return std::get<err_t>(node);
-  }
+  [[nodiscard]] auto as_median() const -> const median_t & { return std::get<median_t>(node); }
+  [[nodiscard]] auto as_final() const -> const final_t & { return std::get<final_t>(node); }
+  [[nodiscard]] auto as_err() const -> const err_t & { return std::get<err_t>(node); }
 
-  [[nodiscard]] auto is_median() const -> bool {
-    return std::holds_alternative<median_t>(node);
-  }
-  [[nodiscard]] auto is_final() const -> bool {
-    return std::holds_alternative<final_t>(node);
-  }
-  [[nodiscard]] auto is_err() const -> bool {
-    return std::holds_alternative<err_t>(node);
-  }
 
-  [[nodiscard]] static auto make(cursor_t cursor) -> node_t {
-    return node_t{final_t(cursor)};
-  }
-  [[nodiscard]] static auto make(median_t::code_t type,
-                                 std::int32_t len) -> node_t {
-    return node_t{median_t{type, len}};
-  }
+  [[nodiscard]] auto is_median() const -> bool { return std::holds_alternative<median_t>(node); }
+  [[nodiscard]] auto is_final() const -> bool { return std::holds_alternative<final_t>(node); }
+  [[nodiscard]] auto is_err() const -> bool { return std::holds_alternative<err_t>(node); }
+
+  [[nodiscard]] static auto make(cursor_t cursor) -> node_t { return node_t{final_t(cursor)}; }
+  [[nodiscard]] static auto make(median_t::code_t type, std::int32_t len) -> node_t { return node_t{median_t{type, len}}; }
 };
 
 #define DISPATCH_ARGS_DECL                                                     \
@@ -74,37 +57,64 @@ struct node_t {
 using fn_t = auto DISPATCH_FNSIG;
 using pair_t = std::pair<tokc::e,fn_t*>;
 
-template <std::size_t N>
-using table_t = std::array<pair_t, N>;
+template <std::size_t N,typename T = pair_t>
+using table_t_impl = std::array<pair_t, N>;
 
-template<typename ...T> consteval auto make_table(T... args) -> auto {
-  return table_t<sizeof...(args)>{args...};
-}
-consteval auto get_toks(const auto t) {
-  std::array<tokc::e, t.size()> table;
-  std::transform(t.begin(), t.end(), table.begin(),
-                 [](const auto &p) { return p.first; });
-  return table;
-}
-consteval auto get_fns(const auto &t) {
-  std::array<fn_t*, t.size()> table;
-  std::transform(t.begin(), t.end(), table.begin(),
-                 [](const auto &p) { return p.second; });
-  return table;
-}
-consteval auto merge_tables(auto a, auto b) -> auto {
-  auto table = std::array<pair_t, a.size() + b.size()>{};
-  std::uint64_t index = 0;
-  for (std::uint64_t i = 0; i < a.size(); i++) {
-    table[index] = a[i];
-    index++;
-  }
-  for (std::uint64_t i = 0; i < b.size(); i++) {
-    table[index] = b[i];
-    index++;
-  }
-  return table;
+template <typename T>
+concept Table = requires(T t, std::size_t i) {
+  { t.begin() };
+  { t.end() };
+  { t.size() } -> std::convertible_to<std::size_t>;
+  { t[i] };
 };
+
+template <typename T>
+concept Pair = requires(T t) {
+  {t.first};
+  {t.second};
+};
+
+template<std::size_t N>
+using table_t = table_t_impl<N>;
+
+template <Pair... T>
+static consteval auto table_t_make(T... args) -> table_t<sizeof...(T)> {
+  return table_t<sizeof...(T)>{args...};
+}
+
+template <Table... T> static consteval auto table_t_make(T... args) -> auto {
+  constexpr std::size_t tsize =
+      (args.size() + ...); // Folding to calculate total size
+  auto table = table_t<tsize>{};
+  std::size_t index = 0;
+  (
+      [&](const auto &t) consteval {
+        for (std::size_t i = 0; i < t.size(); ++i)
+          table[index++] = t[i];
+      }(args),
+      ...);
+  return table_t<tsize>{table};
+}
+
+template <Table T>
+consteval auto table_t_get_fns(T t) -> std::array<fn_t *, t.size()> {
+  auto N = t.size();
+  std::array<fn_t *, t.size()> arr{};
+  for (std::size_t i = 0; i < N; ++i) {
+    arr[i] = t[i].second;
+  }
+  return arr;
+}
+
+template <Table T>
+consteval auto table_t_get_codes(T t) -> std::array<tokc::e, t.size()> {
+  auto N = t.size();
+  std::array<tokc::e, t.size()> arr{};
+  for (std::size_t i = 0; i < N; ++i) {
+    arr[i] = t[i].first;
+  }
+  return arr;
+}
 
 auto push_final(DISPATCH_ARGS_DECL) {
   buffer.push_back(node_t::make(cursor));
@@ -124,8 +134,6 @@ auto dive(DISPATCH_ARGS_DECL) -> void {
   buffer.at(parent_index).as_median().len_ = length;
 }
 
-template <typename... T> using tup = std::tuple<T...>;
-
 template <std::array type>
 [[nodiscard]] inline auto is(cursor_t cursor) -> bool {
   return std::apply(
@@ -134,7 +142,7 @@ template <std::array type>
 template <tokc::e... type>
 [[nodiscard]] inline auto is(cursor_t cursor) -> bool {
   // return cursor->type_ == type;
-  BECOME is<std::array{type...}>(cursor);
+BECOME is<std::array{type...}>(cursor);
 }
 
 template <const tokc::e... type> auto expected(DISPATCH_ARGS_DECL) -> void {
@@ -244,16 +252,6 @@ template <fn_t *fn> auto symetrical DISPATCH_FNSIG {
 };
 
 
-// template <fn_t *fn, tokc::e type, tokc::e group>
-// auto symetrical DISPATCH_FNSIG {
-//   cursor.advance();
-//   if (is<tokc::ENDGROUP>(cursor)) [[unlikely]] {
-//     cursor.advance();
-//     return buffer.push_back(node_t::make(group, 0));
-//   }
-//   BECOME symetrical_impl<fn>(DISPATCH_ARGS);
-// };
-
 template <fn_t* fn, tokc::e type>
 auto symetrical DISPATCH_FNSIG {
   static_assert(tokc::is_open_symetrical(type), "type template argument is not a symetrical");
@@ -327,11 +325,14 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
     }
 
     do {
-      path < make_table(pair_t{tokc::ID, push_final}),DISPATCH_LAM {std::cerr << "Invalid compound element" << '\n';std::abort();} >
-            (DISPATCH_ARGS);
-                 // pair_t{tokc::e::LPAREN, symetrical<base>},
-                 // pair_t{tokc::e::LBRACE, symetrical<expr>},
-                 // pair_t{tokc::e::LCBRACE, symetrical<type<expr>>}
+      path < table_t_make(pair_t{tokc::ID, push_final}), DISPATCH_LAM {
+        std::cerr << "Invalid compound element" << '\n';
+        std::abort();
+      }
+      > (DISPATCH_ARGS);
+      // pair_t{tokc::e::LPAREN, symetrical<base>},
+      // pair_t{tokc::e::LBRACE, symetrical<expr>},
+      // pair_t{tokc::e::LCBRACE, symetrical<type<expr>>}
 
       // if (!is<tokc::e::DCOLON>(cursor)) [[unlikely]]{
       //   break;
@@ -341,10 +342,10 @@ const auto& compound =  dive < 760, DISPATCH_LAM {
       if (is<tokc::e::DCOLON>(cursor)) [[unlikely]] {
         cursor.advance();
       } else {
-        constexpr auto table = make_table(pair_t{tokc::e::LPAREN, symetrical<base>},
+        constexpr auto table = table_t_make(pair_t{tokc::e::LPAREN, symetrical<base>},
                         pair_t{tokc::e::LBRACE, symetrical<expr>},
                         pair_t{tokc::e::LCBRACE, symetrical<type<expr>>});
-        if (is<get_toks(table)>(cursor)) {
+        if (is<table_t_get_codes(table)>(cursor)) {
           path<table>(DISPATCH_ARGS);
           goto AGAIN;
           // if (!is<tokc::e::DCOLON>(cursor)) [[unlikely]]
@@ -386,21 +387,15 @@ auto aggregate_decl_pat DISPATCH_FNSIG{
   BECOME symetrical<elm,tokc::e::LPAREN>(DISPATCH_ARGS);
 }
 
-
-// constexpr auto aggregate_table = make_table(
-//     pair_t{tokc::e::BUILTIN_COLLECTION, dive<30, advance2symetrical<665, collection_impl>>},
-//     pair_t{tokc::e::BUILTIN_REC, dive<30, advance2symetrical<665, decl>>},
-//     pair_t{tokc::e::BUILTIN_UNION, dive<30, advance2symetrical<666, decl>>},
-//     pair_t{tokc::e::BUILTIN_ENUM, dive<30, advance2symetrical<666, enum_impl>>});
-constexpr auto aggregate_table = make_table(
+constexpr auto aggregate_table = table_t_make(
     pair_t{tokc::e::BUILTIN_COLLECTION, dive<30, dive<665,aggregate_decl_pat<collection_impl>>>},
     pair_t{tokc::e::BUILTIN_REC, dive<30, dive<666,aggregate_decl_pat<decl>>>},
     pair_t{tokc::e::BUILTIN_UNION, dive<30, dive<667,aggregate_decl_pat<decl>>>},
     pair_t{tokc::e::BUILTIN_ENUM, dive<30, dive<668,aggregate_decl_pat<enum_impl>>>});
 
-constexpr auto type_table = merge_tables(
+constexpr auto type_table = table_t_make(
     aggregate_table,
-    make_table(pair_t{tokc::e::BUILTIN_VECTOR,dive<30, advance2symetrical<669, type>>},
+    table_t_make(pair_t{tokc::e::BUILTIN_VECTOR,dive<30, advance2symetrical<669, type>>},
                pair_t{tokc::e::BUILTIN_TYPEOF,dive<30, advance2symetrical<667, expr>>},
                pair_t{tokc::e::BUILTIN_FN, dive<30, fn_sig>},
                pair_t{tokc::e::BUILTIN_SCOPE,dive<30, sequence<advance, comptime_arglist>>},
@@ -475,10 +470,10 @@ template <fn_t *const fallback, const int is_compound> auto type DISPATCH_FNSIG 
   */
   //prefix
   static constexpr auto table =
-      make_table(pair_t{tokc::e::CARET, push_final},
+      table_t_make(pair_t{tokc::e::CARET, push_final},
                  pair_t{tokc::e::PERISPOMENI, push_final},
                  pair_t{tokc::e::LBRACE, symetrical<expr>});
-  while (is<get_toks(table)>(cursor)) {
+  while (is<table_t_get_codes(table)>(cursor)) {
     path<table>(DISPATCH_ARGS);
     };
   impl.template operator()<type_table>(DISPATCH_ARGS);
@@ -493,7 +488,7 @@ auto if_else_path DISPATCH_FNSIG{
       pair_t{tokc::e::LPAREN,sequence<if_ctrl_stmt,if_else_path>};
 
   static constexpr auto el_pair = pair_t{tokc::e::LCBRACE, symetrical<base>};
-  static constexpr auto set = make_table(elif_pair, el_pair);
+  static constexpr auto set = table_t_make(elif_pair, el_pair);
   BECOME path<set,DISPATCH_LAM{}>(DISPATCH_ARGS);
 }
 
@@ -511,7 +506,7 @@ auto fn DISPATCH_FNSIG {
 } // namespace if_stmt
 
 #define TOKEN_SYMBOL_SEQUENCE(SPELLING, CODE) pair_t{tokc::e::CODE, push_final},
-constexpr auto expr_table = make_table(
+constexpr auto expr_table = table_t_make(
     #include "../token.def"
     pair_t{tokc::e::ID, compound}, 
     pair_t{tokc::e::INT, push_final},
@@ -609,21 +604,21 @@ auto var_decl DISPATCH_FNSIG {
 }
 
 auto decl DISPATCH_FNSIG {
-  BECOME path<make_table(pair_t{tokc::e::BUILTIN_ALIAS, alias_decl}),var_decl,2>(DISPATCH_ARGS);
+  BECOME path<table_t_make(pair_t{tokc::e::BUILTIN_ALIAS, alias_decl}),var_decl,2>(DISPATCH_ARGS);
 }
 
 auto id DISPATCH_FNSIG {
-  BECOME path<make_table(pair_t{tokc::e::COLON, decl},
+  BECOME path<table_t_make(pair_t{tokc::e::COLON, decl},
                        pair_t{tokc::e::COLONASIGN, var_decl}),
               expr, 1>(DISPATCH_ARGS);
 }
 
 auto base DISPATCH_FNSIG {
   BECOME
-      path<make_table(pair_t{tokc::e::ID, id},
+  path<table_t_make(pair_t{tokc::e::ID, id},
                     pair_t{tokc::e::LPAREN, symetrical<base>},
                     pair_t{tokc::e::BUILTIN_RETURN, advance2<dive<99, expr>>}),
-           expr>(DISPATCH_ARGS);
+       expr>(DISPATCH_ARGS);
 }
 
 auto entry(const token_buffer_t& toks,cursor_t cursor, const cursor_t end) -> podlist_t<node_t> {

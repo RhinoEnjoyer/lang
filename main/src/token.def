@@ -1,34 +1,39 @@
 /*create a test that cheks any spill over that the patterns might have */
 
+#ifndef TOKEN_BASE
+#define TOKEN_BASE(code)
+#endif
+
+
 #ifndef TOKEN_VIRTUAL
-#define TOKEN_VIRTUAL(code)
+#define TOKEN_VIRTUAL(code) TOKEN_BASE(code)
 #endif
 
 #ifndef TOKEN_SYMBOL_SEQUENCE
-#define TOKEN_SYMBOL_SEQUENCE(spelling, code)
+#define TOKEN_SYMBOL_SEQUENCE(spelling, code) TOKEN_BASE(code)
 #endif
 
 #ifndef TOKEN_ONE_CHAR
-#define TOKEN_ONE_CHAR(spelling, code)
+#define TOKEN_ONE_CHAR(spelling, code) TOKEN_BASE(code)
 #endif
 
 #ifndef TOKEN_SYMETRICAL_OPEN_SEQUENCE
 #define TOKEN_SYMETRICAL_OPEN_SEQUENCE(spelling, code, closing_code,           \
-                                       sgroup_code)
+                                       sgroup_code) TOKEN_BASE(code)
 #endif
 
 #ifndef TOKEN_SYMETRICAL_CLOSE_SEQUENCE
 #define TOKEN_SYMETRICAL_CLOSE_SEQUENCE(spelling, code, opening_code,          \
-                                        sgroup_code)
+                                        sgroup_code) TOKEN_BASE(code)
 #endif
 
 #ifndef TOKEN_BUILTIN_KEYWORD
-#define TOKEN_BUILTIN_KEYWORD(spelling, code)
+#define TOKEN_BUILTIN_KEYWORD(spelling, code) TOKEN_BASE(code)
 #endif
 
 /* This kinda sucks if I change stuff all the time but it is good for now */
 #ifndef TOKEN_OPERAND
-#define TOKEN_OPERAND(code)
+#define TOKEN_OPERAND(code) 
 #endif
 
 #ifndef TOKEN_OPERATOR
@@ -52,7 +57,7 @@
 #endif
 
 #ifndef TOKEN_PARALLEL_SEQUENCE
-#define TOKEN_PARALLEL_SEQUENCE(spelling, code, sgroup_code)
+#define TOKEN_PARALLEL_SEQUENCE(spelling, code, sgroup_code) 
 #endif
 
 TOKEN_VIRTUAL(BEGINSYMETRICAL)
@@ -231,3 +236,4 @@ TOKEN_LOPERATOR(EMARK)
 #undef TOKEN_SYMETRICAL_CLOSE_SEQUENCE
 #undef TOKEN_PARALLEL_SEQUENCE
 #undef TOKEN_OPERATOR
+#undef TOKEN_BASE
