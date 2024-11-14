@@ -1,4 +1,4 @@
 #pragma once
-#ifndef BECOME
-#define BECOME [[clang::musttail]] return
+#ifndef become
+#define become [[clang::musttail]] return
 #endif

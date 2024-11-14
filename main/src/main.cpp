@@ -5,8 +5,8 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "./frontend/lexer.cpp"
-#include "./frontend/parser.cpp"
+#include "./frontend/lexer.hpp"
+#include "./frontend/parser.hpp"
 #include "./source_buffer.hpp"
 #include "mesure.hpp"
 #include "token_str.hpp"
@@ -27,7 +27,7 @@ int main() {
     }();
     std::cout << '\t' << src.length() << " bytes" << "\n\n";
 
-    auto [buffer, lex_time] = mesure([&] { return lexer::lex_(&src); });
+    auto [buffer, lex_time] = mesure([&] { return lexer::entry(&src); });
     buffer.toks.shrink_to_fit();
     buffer.locs.shrink_to_fit();
 
@@ -75,8 +75,8 @@ int main() {
     std::cout << "Parser: " << parser_time << "\n"
               << "\tNode count: " << parser_tree.length() << "\n"
               << std::endl;
-    parser::traverse(buffer,parser_tree,buffer);
 
+    parser::traverse(buffer, parser_tree, buffer);
 
     // auto stack = vec<token_t>::make(buffer.toks.size());
     // stack.release();
@@ -88,7 +88,7 @@ int main() {
 
   std::cout.imbue(std::locale("en_US.UTF-8"));
   auto fs = llvm::vfs::getRealFileSystem();
-  lam(fs, "../example0.txt");
+  lam(fs, "../main.foo");
 
   return 0;
 }

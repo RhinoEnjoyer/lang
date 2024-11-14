@@ -1,28 +1,8 @@
 #include "../become.hpp"
-#include "../token.hpp"
-
+#include "./lexer.hpp"
 #include <array>
-#include <cctype>
-#include <cstdlib>
-#include <llvm/ADT/StringExtras.h>
-#include <llvm/ADT/StringRef.h>
-#include <llvm/ADT/StringSwitch.h>
-#include <llvm/Support/Compiler.h>
 
 namespace lexer {
-using pos_t = ssize_t;
-struct lexer_t {
-  token_buffer_t buffer_;
-  llvm::SmallVector<tokc::e, 32> openstack_;
-  std::int32_t line_ = 0;
-
-  [[clang::always_inline]] inline auto push(tokc::e type, const pos_t begin,
-                                            const pos_t end) -> void {
-    buffer_.toks.push_back(token_t{type});
-    buffer_.locs.push_back(
-        srcloc_t{line_, static_cast<std::int32_t>(end - begin), begin});
-  }
-};
 
 #define DISPATCH_RETURN int32_t
 #define DISPATCH_ARGS_DECL                                                     \
@@ -231,18 +211,18 @@ auto comment(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   } else {
     return symbol(DISPATCH_ARGS);
   }
-  BECOME next(DISPATCH_ARGS);
+  become next(DISPATCH_ARGS);
 }
 
 // acording to perf my biggest bottleneck is this one
 auto id(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   const auto text = lex::word(src, pos);
-  //
+
   if (LLVM_UNLIKELY(text.size() == 0))
     return err("ID needs to have charactes in it", DISPATCH_ARGS);
 
   lexer.push(tokc::e::ID, bpos, pos);
-  BECOME next(DISPATCH_ARGS);
+  become next(DISPATCH_ARGS);
 }
 
 auto number(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
@@ -293,12 +273,11 @@ AGAIN:
   if (pos < src.size() &&
       LLVM_UNLIKELY(!whitespace_table[src[pos]] &&
                     !symbol_sequence_bytes[src[pos]] && src[pos] != ';' &&
-                    !symetrical_table_bool[src[pos]])) {
+                    !symetrical_table_bool[src[pos]]))
     err("Invalid following symbol after a number ", DISPATCH_ARGS);
-  }
 
   lexer.push(type, bpos, pos);
-  BECOME next(DISPATCH_ARGS);
+  become next(DISPATCH_ARGS);
 }
 // automaticaly build tables that lead to a function that leads to tables
 // 
@@ -315,13 +294,12 @@ auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 #include "../token.def"
                .Default(tokc::e::ERROR);
 
-  if (LLVM_UNLIKELY(r == tokc::e::ERROR)){
+  if (LLVM_UNLIKELY(r == tokc::e::ERROR))
     err("Unknown symbol " + text.str(), DISPATCH_ARGS);
-  }
 
   lexer.push(r, bpos, pos);
 
-  BECOME next(DISPATCH_ARGS);
+  become next(DISPATCH_ARGS);
 }
 
 template <auto &fn> auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
@@ -332,7 +310,7 @@ template <auto &fn> auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   lexer.push(t, bpos, pos + 1);
   ++pos;
 
-  BECOME next(DISPATCH_ARGS);
+  become next(DISPATCH_ARGS);
 }
 // static auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 //   auto t = one_char_tok_lut[src[pos]];
@@ -343,7 +321,7 @@ template <auto &fn> auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 //   // ++lexer.depth_;
 //   ++pos;
 
-//   BECOME next(DISPATCH_ARGS);
+//   become next(DISPATCH_ARGS);
 // }
 
 namespace symetrical {
@@ -354,7 +332,7 @@ auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
     lexer.openstack_.push_back(symetrical_table[src[pos]]);
     // ++lexer.depth_;
   };
-  BECOME onechar<fn>(DISPATCH_ARGS);
+  become onechar<fn>(DISPATCH_ARGS);
 }
 
 // add a recovery token so we can continiue lexing
@@ -381,10 +359,10 @@ auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
     lexer.push(tokc::ENDGROUP, bpos, pos + 1);
     // ++lexer.depth_;
     ++pos;
-    { BECOME next(DISPATCH_ARGS); }
+    { become next(DISPATCH_ARGS); }
   }
 
-  // BECOME onechar<fn>(DISPATCH_ARGS);
+  // become onechar<fn>(DISPATCH_ARGS);
 }
 } // namespace symetrical
 
@@ -394,10 +372,10 @@ auto scolon(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
     lexer.push(tokc::ENDSTMT, bpos, pos + 1);
     // ++lexer.depth_;
     ++pos;
-    { BECOME next(DISPATCH_ARGS); }
+    { become next(DISPATCH_ARGS); }
   }
 
-  // BECOME onechar<fn>(DISPATCH_ARGS);
+  // become onechar<fn>(DISPATCH_ARGS);
 }
 
 auto builtin(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
@@ -416,16 +394,16 @@ auto builtin(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   lexer.push(r, bpos, pos);
 
   // push token here?
-  BECOME next(DISPATCH_ARGS);
+  become next(DISPATCH_ARGS);
 }
 
 auto hwhitespace(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   lex::hwhitespace(src, pos);
-  BECOME next(DISPATCH_ARGS);
+  become next(DISPATCH_ARGS);
 }
 auto vwhitespace(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   lex::vwhitespace(lexer, src, pos);
-  BECOME next(DISPATCH_ARGS);
+  become next(DISPATCH_ARGS);
 }
 auto strlit(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   // err(__PRETTY_FUNCTION__,DISPATCH_ARGS);
@@ -435,7 +413,7 @@ auto strlit(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   ++pos;
   lexer.push(tokc::e::STRLIT, bpos, pos);
 
-  BECOME next(DISPATCH_ARGS);
+  become next(DISPATCH_ARGS);
 }
 
 constexpr auto dispatch_table = [] constexpr {
@@ -481,12 +459,12 @@ next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   if (LLVM_UNLIKELY(!(pos < static_cast<pos_t>(src.size()))))
     return 0;
 
-  BECOME dispatch_table[static_cast<unsigned char>(src[pos])](lexer, src, pos,
+  become dispatch_table[static_cast<unsigned char>(src[pos])](lexer, src, pos,
                                                               pos);
 }
 } // namespace dispatch
 
-auto lex_(const src_buffer_t *src) {
+auto entry(const src_buffer_t *src) -> token_buffer_t  {
   lexer_t lexer;
   lexer.buffer_.toks = vec<token_t>::create(64);
   lexer.buffer_.locs = vec<srcloc_t>::create(64 * 4);
