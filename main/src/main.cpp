@@ -9,7 +9,7 @@
 #include "./frontend/parser.hpp"
 #include "./source_buffer.hpp"
 #include "mesure.hpp"
-#include "token_str.hpp"
+
 
 int main() {
   auto lam = [](auto fs, const std::string filepath) {
@@ -75,7 +75,6 @@ int main() {
     std::cout << "Parser: " << parser_time << "\n"
               << "\tNode count: " << parser_tree.length() << "\n"
               << std::endl;
-
     parser::traverse(buffer, parser_tree, buffer);
 
     // auto stack = vec<token_t>::make(buffer.toks.size());

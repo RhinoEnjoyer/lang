@@ -279,25 +279,39 @@ AGAIN:
   lexer.push(type, bpos, pos);
   become next(DISPATCH_ARGS);
 }
+
+//this is good idea to do
 // automaticaly build tables that lead to a function that leads to tables
 // 
 // Get all the possible symbols
 // sort them by length
 // match usinging that list
+
 auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   auto text = lex::symbol(src, pos);
   if (LLVM_UNLIKELY(text.size() == 0))
     return err("Symbol string needs to have symbols in it", DISPATCH_ARGS);
 
-  auto r = llvm::StringSwitch<tokc::e>(text)
-#define TOKEN_SYMBOL_SEQUENCE(spelling, code) .Case(spelling, tokc::e::code)
-#include "../token.def"
-               .Default(tokc::e::ERROR);
+  auto subbegin = text.begin();
+  auto len = text.size();
+  #define TOKEN_SYMBOL_SEQUENCE(spelling, code) .Case(spelling, tokc::e::code)
 
-  if (LLVM_UNLIKELY(r == tokc::e::ERROR))
-    err("Unknown symbol " + text.str(), DISPATCH_ARGS);
+  do {
+    const auto view = llvm::StringRef(subbegin, len);
+    const auto r = llvm::StringSwitch<tokc::e>(view)
+                  #include "../token.def"
+                 .Default(tokc::e::ERROR);
 
-  lexer.push(r, bpos, pos);
+    if (r == tokc::e::ERROR) [[unlikely]] {
+      len--;
+      pos--;
+      if (len == 0) [[unlikely]]
+        err("Unknown symbol " + text.str(), DISPATCH_ARGS);
+    } else {
+      lexer.push(r, bpos, pos);
+      break;
+    }
+  } while (true);
 
   become next(DISPATCH_ARGS);
 }

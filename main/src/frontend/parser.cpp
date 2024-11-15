@@ -303,19 +303,24 @@ auto empty DISPATCH_FNSIG {/*Do nothing */return;}
 
 auto& as = sequence<advance, parens<type,medianc::AS>>;
 
-const auto &fn_sig = dive < medianc::FN_SIG, DISPATCH_LAM {
-  cursor.advance();
+auto fn_sig DISPATCH_FNSIG{
+  dive < medianc::FN_SIG, DISPATCH_LAM {
+    cursor.advance();
 
-  if (is<tokc::LBRACE>(cursor)) [[unlikely]]
-    symetrical<expr, medianc::FN_STATE_LIST>(DISPATCH_ARGS);
+    if (is<tokc::LBRACE>(cursor)) [[unlikely]]
+      symetrical<expr, medianc::FN_STATE_LIST>(DISPATCH_ARGS);
 
-  if (is<tokc::LCBRACE>(cursor)) [[unlikely]]
-    symetrical<decl, medianc::COMPTIME_LIST_DECL>(DISPATCH_ARGS);
+    if (is<tokc::LCBRACE>(cursor)) [[unlikely]]
+      symetrical<decl, medianc::COMPTIME_LIST_DECL>(DISPATCH_ARGS);
 
-  parens<decl, medianc::FN_ARGS>(DISPATCH_ARGS);
-  if (is<tokc::LPAREN>(cursor)) [[likely]]
-    parens<type, medianc::FN_RET>(DISPATCH_ARGS);
-}> ;
+    if (is<tokc::LPAREN>(cursor)) [[likely]] {
+      parens<decl, medianc::FN_ARGS>(DISPATCH_ARGS);
+      if (is<tokc::LPAREN>(cursor)) [[likely]]
+        parens<type, medianc::FN_RET>(DISPATCH_ARGS);
+    }
+  }
+  > (DISPATCH_ARGS);
+};
 
 const auto &init_list = advance2<dive<
     medianc::INIT_LIST,
@@ -335,39 +340,45 @@ constexpr auto chain_2_table = table_t_make(
     pair_t{tokc::LBRACE, braces<expr>},
     pair_t{tokc::LCBRACE,cbraces<comptime_arg, medianc::COMPTIME_ARGUMENT_LIST>});
 
+[[clang::always_inline]]
+inline auto chain_mid DISPATCH_FNSIG {
+  do {
+    path<chain_1_table>(DISPATCH_ARGS);
+  AGAIN:
+    if (is<tokc::DCOLON>(cursor)) [[unlikely]] {
+      cursor.advance();
+    } else {
+      if (is<table_t_get_codes(chain_2_table)>(cursor)) {
+        path<chain_2_table>(DISPATCH_ARGS);
+        goto AGAIN;
+      } else {
+        break;
+      }
+    }
+  } while (true);
+}
+
 template <bool compound_ext> auto chain DISPATCH_FNSIG {
-  dive <medianc::CHAIN, DISPATCH_LAM {
+  static auto impl = DISPATCH_LAM {
     if constexpr (compound_ext) {
       path<table_t_make<chain_1_table, chain_2_table>()>(DISPATCH_ARGS);
       constexpr auto codes = table_t_get_codes(chain_2_table);
-
       while (is<codes>(cursor)){
         path<chain_2_table>(DISPATCH_ARGS);
-        std::cout << "A" << std::endl;
       }
 
       if (!is<tokc::DCOLON>(cursor))
         return;
       cursor.advance();
     }
+    chain_mid(DISPATCH_ARGS);
+  };
 
-
-    do {
-      path<chain_1_table>(DISPATCH_ARGS);
-    AGAIN:
-      if (is<tokc::DCOLON>(cursor)) [[unlikely]] {
-        cursor.advance();
-      } else {
-        if (is<table_t_get_codes(chain_2_table)>(cursor)) {
-          path<chain_2_table>(DISPATCH_ARGS);
-          goto AGAIN;
-        } else {
-          break;
-        }
-      }
-    } while (true);
+  if constexpr (compound_ext) {
+    impl(DISPATCH_ARGS);
+  } else {
+    dive<medianc::CHAIN, impl>(DISPATCH_ARGS);
   }
-  > (DISPATCH_ARGS);
 }
 
 auto collection_alias_decl DISPATCH_FNSIG {
@@ -390,17 +401,18 @@ auto enum_impl DISPATCH_FNSIG {
   become expr(DISPATCH_ARGS);
 }
 
-// this used to parens idk why
 auto comptime_arglist DISPATCH_FNSIG {
-  become cbraces<decl,medianc::COMPTIME_ARGUMENT_LIST>(DISPATCH_ARGS);
+  become cbraces<decl, medianc::COMPTIME_ARGUMENT_LIST>(DISPATCH_ARGS);
 }
 
 template<fn_t* elm, medianc::e med>
 auto aggregate_decl_pat DISPATCH_FNSIG{
   cursor.advance();
-  if (is<tokc::LCBRACE>(cursor))
-    comptime_arglist(DISPATCH_ARGS);
-  become parens<elm,med>(DISPATCH_ARGS);
+  dive<med, DISPATCH_LAM{
+    if (is<tokc::LCBRACE>(cursor))
+      comptime_arglist(DISPATCH_ARGS);
+    parens<elm,medianc::BODY>(DISPATCH_ARGS);
+  }>(DISPATCH_ARGS);
 }
 
 
