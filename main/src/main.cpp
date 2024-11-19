@@ -27,6 +27,7 @@ int main() {
     }();
     std::cout << '\t' << src.length() << " bytes" << "\n\n";
 
+
     auto [buffer, lex_time] = mesure([&] { return lexer::entry(&src); });
     buffer.toks.shrink_to_fit();
     buffer.locs.shrink_to_fit();
@@ -34,6 +35,15 @@ int main() {
     // constexpr double togb = 1024 * 1024 * 1024;
     static constexpr double togb = 1000 * 1000 * 1000;
 
+    // for (auto i = buffer.toks.cbegin(); i != buffer.toks.cend(); ++i) {
+    //   std::cout << "token:" << token_code_str(i->type_) <<
+    //   "\n\t"
+    //             << "str:\"" << buffer.str(i) << "\"" << " pos:" << '{'
+    //             // << "depth:" << buffer.token_depth(i) << ' '
+    //             << "row:" << buffer.row(i) << ' '
+    //             << "col:" << buffer.col(i) << ' '
+    //             << "len:" << buffer.len(i) << '}' << '\n';
+    // }
     std::cout << "Lexer: " << lex_time.count() << "sec" << "\n"
               << "\tToken count: " << buffer.toks.size() << '\n'
               << "\tBuffer size in bytes: " << buffer.total_size_in_bytes()
@@ -52,16 +62,6 @@ int main() {
               << " GBytes/Sec" << '\n'
               << "\n\n";
 
-    // for (auto i = buffer.toks.cbegin(); i != buffer.toks.cend(); ++i) {
-    //   std::cout << "token:" << token_code_str(i->type_) <<
-    //   "\n\t"
-    //             << "str:\"" << buffer.str(i) << "\"" << " pos:" << '{'
-    //             // << "depth:" << buffer.token_depth(i) << ' '
-    //             << "row:" << buffer.row(i) << ' '
-    //             << "col:" << buffer.col(i) << ' '
-    //             << "len:" << buffer.len(i) << '}' << '\n';
-    // }
-
     /* Parser
       Tree like structure as a result
       Symetricals are guranteed to work
@@ -69,13 +69,15 @@ int main() {
       Closing Symetricals are ENDGROUP
     */
 
+    //heaptracker shows that alot of allocations are done by std::variant or std::visit or at least they are realated to it?
+
     auto [parser_tree, parser_time] = mesure([&] {
       return parser::entry(buffer, buffer.toks.cbegin(), buffer.toks.cend());
     });
+    parser::traverse(buffer, parser_tree);
     std::cout << "Parser: " << parser_time << "\n"
               << "\tNode count: " << parser_tree.length() << "\n"
               << std::endl;
-    parser::traverse(buffer, parser_tree, buffer);
 
     // auto stack = vec<token_t>::make(buffer.toks.size());
     // stack.release();

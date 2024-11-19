@@ -2,6 +2,11 @@
 #include "./lexer.hpp"
 #include <array>
 
+
+//make the lexer create separate tables for 
+// each symbol that starts with the same char
+// so we have to match on less chars.
+// This should be done programmaticaly
 namespace lexer {
 
 #define DISPATCH_RETURN int32_t
@@ -144,6 +149,7 @@ vwhitespace(lexer_t &lexer, llvm::StringRef src, pos_t &pos) -> void {
   while (pos < static_cast<pos_t>(src.size()) && (src[pos] == '\n')) {
     ++lexer.line_;
     ++pos;
+    lexer.line_begin_ = pos;
   }
 }
 [[clang::always_inline]] auto word(llvm::StringRef src,
@@ -189,7 +195,7 @@ auto next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN;
 
 [[clang::noinline]]
 auto err(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
-  llvm::errs() << "Error: Unexpected char " << src[pos] << " at index " << pos
+  llvm::errs() << "Error: Unexpected char \' " << src[pos] << " \' at index " << pos
                << '\n';
   std::exit(EXIT_FAILURE);
 }
@@ -296,6 +302,8 @@ auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   auto len = text.size();
   #define TOKEN_SYMBOL_SEQUENCE(spelling, code) .Case(spelling, tokc::e::code)
 
+  // A smarter person would make sure to make distinctions for the tokens that
+  // can only have one char. That person ain't me.
   do {
     const auto view = llvm::StringRef(subbegin, len);
     const auto r = llvm::StringSwitch<tokc::e>(view)

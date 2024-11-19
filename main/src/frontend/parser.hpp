@@ -49,6 +49,6 @@ struct node_t {
 };
 
 auto entry(const token_buffer_t &toks, cursor_t cursor, const cursor_t end) -> podlist_t<node_t>;
-auto traverse(token_buffer_t &buf, podlist_t<node_t> &buffer, token_buffer_t &toks) -> void;
+auto traverse(const token_buffer_t &buf, podlist_t<node_t> &buffer) -> void;
 
 } // namespace parser
