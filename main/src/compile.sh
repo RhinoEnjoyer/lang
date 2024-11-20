@@ -22,4 +22,3 @@ wait
 echo "Compiling Main"
 $COMPLILER $GLVL $OLVL $FLAGS $LLVM_CONF -o $EXEC_NAME ./main.cpp  ./parser.so ./lexer.so
 
-

@@ -325,6 +325,11 @@ template<medianc::e dive_code,auto fn> auto advance2 DISPATCH_FNSIG{
   become dive<dive_code, advance2<fn>>(DISPATCH_ARGS);
 }
 
+template<fn_t* fn>
+auto stmt DISPATCH_FNSIG{ 
+  become sequence<fn, consume<tokc::ENDSTMT>>(DISPATCH_ARGS);
+}
+
 auto type_or_expr DISPATCH_FNSIG;
 const auto& comptime_arg = type_or_expr;
 // const auto& compound_literal = type<nullptr, 1>;
@@ -332,7 +337,7 @@ const auto& comptime_arg = type_or_expr;
 
 auto empty DISPATCH_FNSIG {/*Do nothing */return;}
 
-auto& as = sequence<advance, parens<type,medianc::AS>>;
+auto& as = sequence<advance, parens_wrapper<stmt<type>,medianc::AS>>;
 
 auto fn_sig DISPATCH_FNSIG{
   dive < medianc::FN_SIG, DISPATCH_LAM {
@@ -435,6 +440,7 @@ auto enum_impl DISPATCH_FNSIG {
 
 auto comptime_arglist DISPATCH_FNSIG {
   become cbraces<decl, medianc::COMPTIME_ARGUMENT_LIST>(DISPATCH_ARGS);
+
 }
 
 template<fn_t* elm, medianc::e med>
@@ -547,21 +553,24 @@ constexpr auto symbol_operator_table = table_t_make(
     pair_t{tokc::VIRTUAL_EMPTY, empty});
 
 namespace if_stmt {
-static constexpr auto &if_ctrl_stmt =
-    dive<medianc::CTRL_EXPR, sequence<symetrical<expr>, symetrical<base, tokc::LCBRACE>>>;
+
+const auto &ctrl_expr = parens_wrapper<stmt<expr>, medianc::CTRL_EXPR>;
+const auto &body = cbraces<base, medianc::BODY>;
+const auto &if_branch = sequence<ctrl_expr, body>;
+
 auto if_else_path DISPATCH_FNSIG {
   static constexpr auto elif_pair =
-      pair_t{tokc::LPAREN, sequence<if_ctrl_stmt, if_else_path>};
+      pair_t{tokc::LPAREN, sequence<dive<medianc::ELIF,if_branch>, if_else_path>};
 
-  static constexpr auto el_pair = pair_t{tokc::LCBRACE, symetrical<base>};
+  static constexpr auto el_pair = pair_t{tokc::LCBRACE, dive<medianc::ELSE,body>};
   static constexpr auto set = table_t_make(elif_pair, el_pair);
   become path<set, DISPATCH_LAM{}>(DISPATCH_ARGS);
 }
 
 auto fn DISPATCH_FNSIG {
-  become dive<medianc::FN_SIG,DISPATCH_LAM{
+  become dive<medianc::IF_EXPR,DISPATCH_LAM{
   cursor.advance();
-  if_ctrl_stmt(DISPATCH_ARGS);
+  dive<medianc::IF,if_branch>(DISPATCH_ARGS);
 
   if(!is<tokc::LPAREN>(cursor))
     return;
@@ -656,25 +665,16 @@ auto type_or_expr DISPATCH_FNSIG {
   > (DISPATCH_ARGS);
 }
 
+const auto &loop_body =
+    parens<path<table_t_make(pair_t{tokc::BUILTIN_BREAK, push_final}), base>,
+           medianc::BODY>;
 
-
-
-
-template<fn_t* fn>
-auto stmt DISPATCH_FNSIG{ 
-  become sequence<fn, consume<tokc::ENDSTMT>>(DISPATCH_ARGS);
-}
-
-
-//while and fn would be intresting if they were expresions
-//it would mean that you can pipe sutff into them instead 
-//of manually creating extra variables that you might not use later
-//and liter the available namespace
 auto while_fn DISPATCH_FNSIG {
-  become dive<medianc::WHILE,
-              sequence<consume<tokc::BUILTIN_WHILE>,
-                       parens_wrapper<stmt<expr>, medianc::CTRL_EXPR>, parens<base,medianc::BODY>>>(
-      DISPATCH_ARGS);
+  become
+      dive<medianc::WHILE,
+           sequence<consume<tokc::BUILTIN_WHILE>,
+                    parens_wrapper<stmt<expr>, medianc::CTRL_EXPR>, loop_body>>(
+          DISPATCH_ARGS);
 }
 
 auto for_fn DISPATCH_FNSIG {
@@ -683,7 +683,7 @@ auto for_fn DISPATCH_FNSIG {
            sequence<consume<tokc::BUILTIN_FOR>,
                     parens_wrapper<sequence<stmt<decl>, stmt<expr>, stmt<expr>>,
                                    medianc::CTRL_EXPR>,
-                    parens<base, medianc::BODY>>>(DISPATCH_ARGS);
+                    loop_body>>(DISPATCH_ARGS);
 }
 
 auto switch_fn DISPATCH_FNSIG {
@@ -700,7 +700,6 @@ auto switch_fn DISPATCH_FNSIG {
 
 template <fn_t *intro>
 auto complit_fn DISPATCH_FNSIG {
-
   constexpr fn_t *fn = [] consteval -> fn_t * {
     if constexpr (intro != cbraces<type, medianc::COMPOUND_LITERAL_TYPE>)
       return dive<medianc::COMPOUND_LITERAL_TYPE, intro>;
@@ -730,8 +729,7 @@ auto expr DISPATCH_FNSIG {
   > (DISPATCH_ARGS);
 }
 
-const auto &attributes = sequence<consume<tokc::BUILTIN_DUCKLING>,
-                                  braces<chain, medianc::ATTRIBUTES>>;
+const auto &attributes = sequence<consume<tokc::BUILTIN_DUCKLING>,braces<chain, medianc::ATTRIBUTES>>;
 
 auto var_decl DISPATCH_FNSIG {
   dive < medianc::DECL, DISPATCH_LAM {
@@ -802,10 +800,7 @@ const auto &import_fn =
 
 
 constexpr auto base_table = table_t_make(
-                  pair_t{tokc::ID,
-                         path<table_t_make(pair_t{tokc::COLON, decl},
-                                           pair_t{tokc::COLONASIGN, var_decl}),
-                              expr, 1>},
+                  pair_t{tokc::ID,path<table_t_make(pair_t{tokc::COLON, decl},pair_t{tokc::COLONASIGN, var_decl}),expr, 1>},
                   pair_t{tokc::BUILTIN_IMPORT, import_fn},
                   pair_t{tokc::BUILTIN_BECOME,advance2<dive<medianc::BECOME, expr>>},
                   pair_t{tokc::BUILTIN_FOR, for_fn},
@@ -815,7 +810,7 @@ auto base DISPATCH_FNSIG { become path<base_table, expr>(DISPATCH_ARGS); }
 auto entry(const token_buffer_t &toks, cursor_t cursor,
            const cursor_t end) -> podlist_t<node_t> {
   auto buffer = podlist_t<node_t>::create(64);
-  symetrical<base>(DISPATCH_ARGS);
+  symetrical<base,medianc::FILE>(DISPATCH_ARGS);
   return buffer;
 }
 
@@ -833,29 +828,29 @@ auto traverse_impl(const token_buffer_t &buf, vec<node_t>::it &cursor,
 
   while (cursor != end) {
     // People say std::visit is slow
-    std::visit(
-        overloaded{[&](node_t::final_t &val) {
-                     {
-                       print << "Final: " << token_code_str(val->type_) << " \'"
-                             << buf.str(val) << "\'" << '\n';
-                     }
-                     cursor.advance();
-                   },
-                   [&](node_t::median_t &val) {
-                     {
-                       print << "Median: " << medianc::to_str(val.type_)
-                             << " length: " << val.len_ << '\n';
-                     }
-                     cursor.advance();
-                     traverse_impl(buf, cursor, cursor + val.len_, depth + 1);
-                   },
-                   [&](node_t::err_t &val) {
-                     {
-                       print << "Error, it is joever" << '\n';
-                       std::abort();
-                     }
-                   }},
-        cursor->node);
+    std::visit(overloaded{[&](node_t::final_t &val) {
+                            {
+                              print << "Final: " << token_code_str(val->type_)
+                                    << " \'" << buf.str(val) << "\'" << '\n';
+                            }
+                            cursor.advance();
+                          },
+                          [&](node_t::median_t &val) {
+                            {
+                              print << "Median: " << medianc::to_str(val.type_)
+                                    << " length: " << val.len_ << '\n';
+                            }
+                            cursor.advance();
+                            traverse_impl(buf, cursor, cursor + val.len_,
+                                          depth + 1);
+                          },
+                          [&](node_t::err_t &val) {
+                            {
+                              print << "Error, it is joever" << '\n';
+                              std::abort();
+                            }
+                          }},
+               cursor->node);
   }
 #undef space_str
 #undef print
