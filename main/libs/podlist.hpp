@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <llvm/Support/Compiler.h>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -9,6 +8,8 @@
 #include <optional>
 #include <type_traits>
 #include <utility>
+
+
 
 /* Move only container
  *  made for PODs
@@ -101,7 +102,7 @@ struct podlist_t {
   }
   // Move assignment operator
   podlist_t& operator=(podlist_t&& other) noexcept {
-    if (LLVM_UNLIKELY(this != &other)) {
+    if (__builtin_expect((bool)(this != &other), false)) {
       this->release();  // Free the current resources
       begin_ = other.begin_;
       len_ = other.len_;

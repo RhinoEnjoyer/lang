@@ -25,9 +25,7 @@ core: @scope = (
     free: @fn(@self; ptr: @ptr)() =
       (m::free(@self::m::allocator; ptr));
   );
-);
 
-core: @scope = (
   array_t: @type = @rec{T: @type}(
     len: u64;
     data: []T; //this must be on the bottom of the record
@@ -38,10 +36,8 @@ core: @scope = (
     make: @fn(allocator: core::allocator_t; len: u64)(array_t{T}) = 
       (@ret @as(^fptr{T})allocator::alloc(make_len(len)));
   );
-);
+// a: @attribute{T: @type; V: s32} = ();
 
-
-core: @scope = (
   arena_allocator_t: @type = @rec(
     len: u64;
     begin_ptr: @ptr;
@@ -87,7 +83,6 @@ main: @fn(argc: s32; argv: ^^u8)(s32) = (
   a := core::array_t::make(malloc_al; 4) -> @set(@pipe::data; @(1;2;3;4));
 
   arr := @as(^s32)pool_al::alloc(10);
-
   fn0 := @fn::(@ret 30);
   fn2 := @fn(a: s32)(s32)::(@ret a + 30);
 
@@ -104,6 +99,15 @@ main: @fn(argc: s32; argv: ^^u8)(s32) = (
   @pipe -> @while(@pipe > 10)(@pipe += 10);
 
   10 + 30 -> @pipe + @if(@pipe > 10){30}(@pipe < 5 ){35}{40};
-  @ret 0;
+
+  a{1 - 0; s32} + @sizeof(s32);
+
+  a: @typeof(10 + 30) = 10;
+
+  [a; b; c] := func_call();
+  [a; b; c] := @(10;20;30);
+  [a; b; c] := @rec(a: s32; b: s32; c: s32)::(10;20;30);
+
+  b := (30)::a(20)(39)(10; 30)::a;
 );
 

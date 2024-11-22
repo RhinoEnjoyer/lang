@@ -15,7 +15,7 @@ namespace lexer {
 #define DISPATCH_ARGS lexer, src, bpos, pos
 
 #define asign2table(table, index, val) table[index] = val
-constexpr auto one_char_tok_lut = [] constexpr {
+constexpr auto one_char_tok_lut = [] consteval {
   std::array<tokc::e, 256> table = {tokc::e::ERROR};
 #define TOKEN_ONE_CHAR(spelling, code)                                         \
   asign2table(table, spelling[0], tokc::e::code);
@@ -32,7 +32,7 @@ constexpr auto one_char_tok_lut = [] constexpr {
 using dispatch_fn_t = auto(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN;
 using dispatch_table_t = std::array<dispatch_fn_t *, 256>;
 
-constexpr auto symbol_sequence_bytes = [] constexpr {
+constexpr auto symbol_sequence_bytes = [] consteval {
   std::array<bool, 256> table = {false};
 #define TOKEN_SYMBOL_SEQUENCE(spelling, code)                                  \
   for (std::uint32_t i = 0; i < sizeof(spelling); ++i)                         \
@@ -42,7 +42,7 @@ constexpr auto symbol_sequence_bytes = [] constexpr {
   return table;
 }();
 
-constexpr auto id_start_byte_lut = [] constexpr {
+constexpr auto id_start_byte_lut = [] consteval {
   std::array<bool, 256> table = {false};
   for (char c = 'A'; c <= 'Z'; ++c)
     table[c] = true;
@@ -52,14 +52,14 @@ constexpr auto id_start_byte_lut = [] constexpr {
   return table;
 }();
 
-static constexpr auto id_byte_lut = [] constexpr {
+constexpr auto id_byte_lut = [] consteval {
   std::array<bool, 256> table = id_start_byte_lut;
   for (char c = '0'; c <= '9'; ++c)
     table[c] = true;
   return table;
 }();
 
-static constexpr auto symetrical_table = [] constexpr {
+constexpr auto symetrical_table = [] consteval {
   std::array<tokc::e, 256> table = {tokc::e::ERROR};
 #define TOKEN_SYMETRICAL_OPEN_SEQUENCE(spelling, code, closing_code,           \
                                        sgroup_code)                            \
@@ -71,7 +71,7 @@ static constexpr auto symetrical_table = [] constexpr {
   return table;
 }();
 
-static constexpr auto parallel_table = [] constexpr {
+constexpr auto parallel_table = [] consteval {
   std::array<tokc::e, 256> table = {tokc::e::ERROR};
 #define TOKEN_PARALLEL_SEQUENCE(spelling, code, sgroup_code)                   \
   asign2table(table, spelling[0], tokc::e::code);
@@ -79,7 +79,7 @@ static constexpr auto parallel_table = [] constexpr {
 #include "../token.def"
   return table;
 };
-static constexpr auto parallel_table_bool = [] constexpr {
+constexpr auto parallel_table_bool = [] consteval {
   std::array<bool, 256> table = {false};
 #define TOKEN_PARALLEL_SEQUENCE(spelling, code, sgroup_code)                   \
   asign2table(table, spelling[0], true);
@@ -88,7 +88,7 @@ static constexpr auto parallel_table_bool = [] constexpr {
   return table;
 };
 
-static constexpr auto symetrical_table_bool = [] constexpr {
+constexpr auto symetrical_table_bool = [] consteval {
   std::array<bool, 256> table = {false};
 #define TOKEN_SYMETRICAL_OPEN_SEQUENCE(spelling, code, closing_code,           \
                                        sgroup_code)                            \
@@ -99,8 +99,16 @@ static constexpr auto symetrical_table_bool = [] constexpr {
 #include "../token.def"
   return table;
 }();
+constexpr auto symetrical_close_table_bool = [] consteval {
+  std::array<bool, 256> table = {false};
+#define TOKEN_SYMETRICAL_CLOSE_SEQUENCE(spelling, code, opening_code,          \
+                                        sgroup_code)                           \
+  asign2table(table, (spelling)[0], true);
+#include "../token.def"
+  return table;
+}();
 
-static constexpr auto whitespace_table = [] constexpr {
+constexpr auto whitespace_table = [] consteval {
   std::array<bool, 256> table = {false};
   table[' '] = true;
   table['\n'] = true;
@@ -239,6 +247,7 @@ auto number(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   tokc::e type = tokc::e::INT;
   // bad for perfomance
   // maybe use a smaller dispatch table??
+  //TABLE 1
   bool dot = false;
 AGAIN:
   if (LLVM_LIKELY(pos < src.size())) {
@@ -261,9 +270,9 @@ AGAIN:
     }
   }
 
+  //TABLE 2
   // same goes for this one
-  if (LLVM_LIKELY(pos < src.size() &&
-                  LLVM_UNLIKELY(src[pos] == 'e'))) { /* exponent */
+  if (LLVM_LIKELY(pos < src.size() && LLVM_UNLIKELY(src[pos] == 'e'))) { /* exponent */
     ++pos;
     if (LLVM_LIKELY(src[pos] == '+' || src[pos] == '-'))
       ++pos;
@@ -275,11 +284,15 @@ AGAIN:
       err("Need to have a valid Exponent", DISPATCH_ARGS);
   }
 
+   //TABLE 3
   // and this one
   if (pos < src.size() &&
-      LLVM_UNLIKELY(!whitespace_table[src[pos]] &&
-                    !symbol_sequence_bytes[src[pos]] && src[pos] != ';' &&
-                    !symetrical_table_bool[src[pos]]))
+      LLVM_UNLIKELY(   !whitespace_table[src[pos]] 
+                    && !symbol_sequence_bytes[src[pos]] 
+                    && src[pos] != ';' 
+                    && !symetrical_close_table_bool[src[pos]] //This used to be symetrical_table_bool 
+                  )
+    )
     err("Invalid following symbol after a number ", DISPATCH_ARGS);
 
   lexer.push(type, bpos, pos);
@@ -438,7 +451,7 @@ auto strlit(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   become next(DISPATCH_ARGS);
 }
 
-constexpr auto dispatch_table = [] constexpr {
+constexpr auto dispatch_table = [] consteval {
   dispatch_table_t table = {};
   for (int i = 0; i < 256; ++i) {
     if (id_start_byte_lut[i] == true)
