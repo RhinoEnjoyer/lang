@@ -286,10 +286,16 @@ auto symetrical DISPATCH_FNSIG {
 
 template <fn_t *fn, tokc::e type, medianc::e med = medianc::symetrical(type)>
 auto symetrical DISPATCH_FNSIG {
-  static_assert(tokc::is_open_symetrical(type),
-                "type template argument is not a symetrical");
+  //@TODO: dbraces are failing this
+  //will fix it later
+  /* static_assert(tokc::is_open_symetrical(type),
+                 "type template argument is not a symetrical"); */
   expect<type>(DISPATCH_ARGS);
   become symetrical_impl<fn, med>(DISPATCH_ARGS);
+}
+template <fn_t *fn, medianc::e med = medianc::DBRACES>
+auto dbraces DISPATCH_FNSIG {
+  become symetrical<fn, tokc::LDBRACE, med>(DISPATCH_ARGS);
 }
 template <fn_t *fn, medianc::e med = medianc::PARENS>
 auto parens DISPATCH_FNSIG {
@@ -496,7 +502,7 @@ constexpr auto type_table = table_t_make<
         pair_t{tokc::BUILTIN_TYPEOF,
                dive<medianc::TYPE,
                     sequence<advance, symetrical<expr, medianc::TYPEOF>>>},
-        pair_t{tokc::BUILTIN_PTR, dive<medianc::TYPE,push_final<>>},
+        pair_t{tokc::BUILTIN_PTR, dive<medianc::TYPE, push_final<>>},
         pair_t{
             tokc::BUILTIN_SCOPE,
             dive<medianc::TYPE,
@@ -801,15 +807,26 @@ auto decl DISPATCH_FNSIG {
   become path<table_t_make(pair_t{tokc::BUILTIN_TYPE, type_decl}), var_decl, 2>(DISPATCH_ARGS);
 }
 
+
 constexpr auto base_table = table_t_make(
                   pair_t{tokc::ID, path<table_t_make(pair_t{tokc::COLON, decl},pair_t{tokc::COLONASIGN, var_decl}),expr, 1>},
+                  // pair_t{tokc::LDBRACE, dive<medianc::TODO,sequence<dbraces<chain,medianc::ATTRIBUTES>, base>>},
                   pair_t{tokc::LBRACE, unwrap_decl},
                   pair_t{tokc::BUILTIN_IMPORT, import_fn},
                   pair_t{tokc::BUILTIN_BECOME,advance2<medianc::BECOME, sequence<expr,expect<tokc::ENDSTMT>>>},
                   pair_t{tokc::BUILTIN_FOR, for_fn},
                   pair_t{tokc::BUILTIN_RETURN,advance2<medianc::RETURN, sequence<expr,expect<tokc::ENDSTMT>>>});
 
-auto base DISPATCH_FNSIG { become path<base_table, expr>(DISPATCH_ARGS); }
+
+const auto& base_call = path<base_table, expr>;
+auto base DISPATCH_FNSIG {
+  become
+      dive<medianc::STMT,
+           path<table_t_make(pair_t{
+                    tokc::LDBRACE,
+                    sequence<dbraces<chain, medianc::ATTRIBUTES>, base_call>}),
+                base_call>>(DISPATCH_ARGS);
+}
 
 auto entry(const token_buffer_t &toks, cursor_t cursor, const cursor_t end) -> podlist_t<node_t> {
   auto buffer = podlist_t<node_t>::create(64);

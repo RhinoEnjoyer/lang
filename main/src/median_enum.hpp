@@ -26,10 +26,12 @@ constexpr inline e symetrical(tokc::e val) {
     case tokc::LPAREN: return e::PARENS;
     case tokc::LBRACE: return e::BRACES;
     case tokc::LCBRACE: return e::CBRACES;
+    case tokc::LDBRACE: return e::DBRACES;
 
     case tokc::RPAREN: return e::PARENS;
     case tokc::RBRACE: return e::BRACES;
     case tokc::RCBRACE: return e::CBRACES;
+    case tokc::RDBRACE: return e::DBRACES;
     default: return e::last;
   }
 }

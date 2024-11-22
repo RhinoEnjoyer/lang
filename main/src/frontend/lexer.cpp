@@ -359,6 +359,7 @@ template <auto &fn> auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 //   become next(DISPATCH_ARGS);
 // }
 
+//this should also become a symbol with a special function at the front for open and close checks
 namespace symetrical {
 
 auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
@@ -370,21 +371,32 @@ auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   become onechar<fn>(DISPATCH_ARGS);
 }
 
-// add a recovery token so we can continiue lexing
-auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
-  static constexpr auto fn = [](tokc::e r,
-                                DISPATCH_ARGS_DECL) constexpr -> void {
-    if (LLVM_UNLIKELY(lexer.openstack_.empty()))
-      err("Openstack is empty", DISPATCH_ARGS);
-    else if (LLVM_UNLIKELY(lexer.openstack_.back() != r))
-      err("Wrong closing symetrical token", DISPATCH_ARGS);
-    // --lexer.depth_;
-    lexer.openstack_.pop_back();
-  };
+auto brace_open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+  if(pos + 1 < src.size() && src[pos+1] == '[') [[unlikely]] {
+    lexer.openstack_.push_back(tokc::RDBRACE);
+    pos++;
+    lexer.push(tokc::LDBRACE, bpos, pos+1);
+    pos++;
+    { become next(DISPATCH_ARGS); }
+  } 
+  become open(DISPATCH_ARGS);
+}
 
+
+static constexpr auto close_check = [](tokc::e r,
+                              DISPATCH_ARGS_DECL) constexpr -> void {
+  if (LLVM_UNLIKELY(lexer.openstack_.empty()))
+    err("Openstack is empty", DISPATCH_ARGS);
+  else if (LLVM_UNLIKELY(lexer.openstack_.back() != r))
+    err("Wrong closing symetrical token", DISPATCH_ARGS);
+  // --lexer.depth_;
+  lexer.openstack_.pop_back();
+};
+
+auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   {
     // auto t = one_char_tok_lut[src[pos]];
-    fn(one_char_tok_lut[src[pos]], DISPATCH_ARGS);
+    close_check(one_char_tok_lut[src[pos]], DISPATCH_ARGS);
 
     if (LLVM_UNLIKELY(
             !tokc::is_open_symetrical(lexer.buffer_.toks.back().type_) &&
@@ -399,6 +411,28 @@ auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 
   // become onechar<fn>(DISPATCH_ARGS);
 }
+
+auto brace_close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+  if(pos + 1 < src.size() && src[pos+1] == ']') [[unlikely]]{
+    pos++;
+    close_check(tokc::RDBRACE,DISPATCH_ARGS);
+
+    if (LLVM_UNLIKELY( 
+            !tokc::is_open_symetrical(lexer.buffer_.toks.back().type_) &&
+            lexer.buffer_.toks.back().type_ != tokc::ENDSTMT))
+      lexer.push(tokc::ENDSTMT, bpos, pos + 1);
+
+    lexer.push(tokc::ENDGROUP, bpos, pos + 1);
+    // ++lexer.depth_;
+    ++pos;
+
+    become next(DISPATCH_ARGS); 
+  } 
+  become close(DISPATCH_ARGS);
+}
+
+
+// add a recovery token so we can continiue lexing
 } // namespace symetrical
 
 auto scolon(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
@@ -485,6 +519,8 @@ constexpr auto dispatch_table = [] consteval {
   asign2table(table, '/', comment);
 
   asign2table(table, '\"', strlit);
+  asign2table(table, '[', symetrical::brace_open);
+  asign2table(table, ']', symetrical::brace_close);
 
   return table;
 }();

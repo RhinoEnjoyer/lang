@@ -69,6 +69,12 @@ list: @type = @rec{T: @type}(
   );
 );
 
+A: @fn(a: some_record)(s32; s32) = 
+  a::m::fn(b) + 20 
+    -> @pipe *10 
+    -> @pipe * @pipe
+    -> A(@pipe::a);
+
 
 main: @fn(argc: s32; argv: ^^u8)(s32) = (
   pool := core::poolallocator::make();
@@ -107,7 +113,7 @@ main: @fn(argc: s32; argv: ^^u8)(s32) = (
   [a; b; c] := func_call();
   [a; b; c] := @(10;20;30);
   [a; b; c] := @rec(a: s32; b: s32; c: s32)::(10;20;30);
-
-  b := (30)::a(20)(39)(10; 30)::a;
+  
+  [[chain]] b := (30)::a(10; 30)::a;
+  [[chain2]] 10;
 );
-
