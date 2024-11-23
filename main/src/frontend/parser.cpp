@@ -347,8 +347,7 @@ template <medianc::e dive_code, auto fn> auto advance2 DISPATCH_FNSIG {
   become dive<dive_code, advance2<fn>>(DISPATCH_ARGS);
 }
 
-template<fn_t* fn>
-auto stmt DISPATCH_FNSIG{ 
+template <fn_t *fn> auto end_with_scolon DISPATCH_FNSIG {
   become sequence<fn, consume<tokc::ENDSTMT>>(DISPATCH_ARGS);
 }
 
@@ -359,22 +358,38 @@ const auto& comptime_arg = type_or_expr;
 
 auto empty DISPATCH_FNSIG {/*Do nothing */return;}
 
-auto& as = sequence<advance, parens_wrapper<stmt<type>,medianc::AS>>;
+
+auto& as = sequence<advance, parens_wrapper<end_with_scolon<type>,medianc::AS>>;
+
+[[clang::always_inline]] inline auto attributes DISPATCH_FNSIG {
+  become dbraces<chain, medianc::ATTRIBUTES>(DISPATCH_ARGS);
+}
+
+template<medianc::e wrap, fn_t* fn, fn_t* fallback = fn>
+auto attribute_path DISPATCH_FNSIG{
+  dive<wrap,
+       path<table_t_make(pair_t{tokc::LDBRACE, sequence<attributes, fn>}), fallback>>(
+      DISPATCH_ARGS);
+}
 
 auto fn_sig DISPATCH_FNSIG{
   dive < medianc::FN_SIG, DISPATCH_LAM {
     advance(DISPATCH_ARGS);
 
+    //Function state 
     if (is<tokc::LBRACE>(cursor)) [[unlikely]]
       symetrical<expr, medianc::FN_STATE_LIST>(DISPATCH_ARGS);
 
+    //Compile time arguments declaration
     if (is<tokc::LCBRACE>(cursor)) [[unlikely]]
-      symetrical<decl, medianc::COMPTIME_LIST_DECL>(DISPATCH_ARGS);
-
+      symetrical<attribute_path<medianc::ARGUMENT,decl>, medianc::COMPTIME_LIST_DECL>(DISPATCH_ARGS);
+    
     if (is<tokc::LPAREN>(cursor)) [[likely]] {
-      parens<path<table_t_make(pair_t{tokc::BUILTIN_SELF, dive<medianc::SELF_ARG,push_final<>>}),decl>, medianc::FN_ARGS>(DISPATCH_ARGS);
+      //Runtime Arguments
+      parens<attribute_path<medianc::ARGUMENT, path<table_t_make(pair_t{tokc::BUILTIN_SELF, dive<medianc::SELF_ARG,push_final<>>}),decl>>, medianc::FN_ARGS>(DISPATCH_ARGS);
       if (is<tokc::LPAREN>(cursor)) [[likely]]
-        parens<type, medianc::FN_RET>(DISPATCH_ARGS);
+        //Return type
+        parens<attribute_path<medianc::TODO ,type>, medianc::FN_RET>(DISPATCH_ARGS);
     }
   }
   > (DISPATCH_ARGS);
@@ -461,7 +476,7 @@ auto enum_impl DISPATCH_FNSIG {
 }
 
 auto comptime_arglist DISPATCH_FNSIG {
-  become cbraces<decl, medianc::COMPTIME_ARGUMENT_LIST>(DISPATCH_ARGS);
+  become cbraces<attribute_path<medianc::ARGUMENT,decl>, medianc::COMPTIME_ARGUMENT_LIST>(DISPATCH_ARGS);
 }
 
 template<fn_t* elm, medianc::e med>
@@ -474,9 +489,9 @@ auto aggregate_decl_pat DISPATCH_FNSIG{
   }>(DISPATCH_ARGS);
 }
 
-auto collection_fn DISPATCH_FNSIG {become dive<medianc::TYPE, aggregate_decl_pat<collection_alias_decl, medianc::COLLECTION>>(DISPATCH_ARGS);}
+auto collection_fn DISPATCH_FNSIG {become dive<medianc::TYPE, aggregate_decl_pat<attribute_path<medianc::ELEMENT,collection_alias_decl>, medianc::COLLECTION>>(DISPATCH_ARGS);}
 auto record_fn     DISPATCH_FNSIG {become dive<medianc::TYPE, aggregate_decl_pat<base, medianc::RECORD>>(DISPATCH_ARGS);}
-auto union_fn      DISPATCH_FNSIG {become dive<medianc::TYPE, aggregate_decl_pat<decl, medianc::UNION>>(DISPATCH_ARGS);}
+auto union_fn      DISPATCH_FNSIG {become dive<medianc::TYPE, aggregate_decl_pat<base, medianc::UNION>>(DISPATCH_ARGS);}
 auto enum_fn       DISPATCH_FNSIG {become dive<medianc::TYPE, aggregate_decl_pat<enum_impl, medianc::ENUM>>(DISPATCH_ARGS);}
 
 constexpr auto aggregate_table = table_t_make(
@@ -503,12 +518,8 @@ constexpr auto type_table = table_t_make<
                dive<medianc::TYPE,
                     sequence<advance, symetrical<expr, medianc::TYPEOF>>>},
         pair_t{tokc::BUILTIN_PTR, dive<medianc::TYPE, push_final<>>},
-        pair_t{
-            tokc::BUILTIN_SCOPE,
-            dive<medianc::TYPE,
-                 dive<medianc::SCOPE,
-                      sequence<advance, path<table_t_make(pair_t{
-                                                 tokc::LCBRACE, cbraces<decl>}),
+        pair_t{tokc::BUILTIN_SCOPE,
+            dive<medianc::TYPE,dive<medianc::SCOPE,sequence<advance, path<table_t_make(pair_t{tokc::LCBRACE, comptime_arglist}), // @TODO: ????? this should be somethign else, check aggregate_decl functon if it can be used here
                                              empty>>>>})>();
 
 auto get_index(vec<node_t>& buffer) -> std::uint64_t{
@@ -575,7 +586,7 @@ constexpr auto symbol_operator_table = table_t_make(
 
 namespace if_stmt {
 
-const auto &ctrl_expr = parens_wrapper<stmt<expr>, medianc::CTRL_EXPR>;
+const auto &ctrl_expr = parens_wrapper<end_with_scolon<expr>, medianc::CTRL_EXPR>;
 const auto &body = cbraces<base, medianc::BODY>;
 const auto &if_branch = sequence<ctrl_expr, body>;
 
@@ -675,7 +686,7 @@ auto while_fn DISPATCH_FNSIG {
   become
       dive<medianc::WHILE,
            sequence<consume<tokc::BUILTIN_WHILE>,
-                    parens_wrapper<stmt<expr>, medianc::CTRL_EXPR>, loop_body>>(
+                    parens_wrapper<end_with_scolon<expr>, medianc::CTRL_EXPR>, loop_body>>(
           DISPATCH_ARGS);
 }
 
@@ -683,7 +694,7 @@ auto for_fn DISPATCH_FNSIG {
   become
       dive<medianc::FOR,
            sequence<consume<tokc::BUILTIN_FOR>,
-                    parens_wrapper<sequence<stmt<decl>, stmt<expr>, stmt<expr>>,
+                    parens_wrapper<sequence<end_with_scolon<decl>, end_with_scolon<expr>, end_with_scolon<expr>>,
                                    medianc::CTRL_EXPR>,
                     loop_body>>(DISPATCH_ARGS);
 }
@@ -731,9 +742,6 @@ auto expr DISPATCH_FNSIG {
   }
   > (DISPATCH_ARGS);
 }
-
-auto attributes DISPATCH_FNSIG {become sequence<consume<tokc::BUILTIN_DUCKLING>,
-                                  braces<chain, medianc::ATTRIBUTES>>(DISPATCH_ARGS);}
 
 auto var_decl DISPATCH_FNSIG {
   dive < medianc::DECL, DISPATCH_LAM {
@@ -804,28 +812,58 @@ auto unwrap_decl DISPATCH_FNSIG {
 }
 
 auto decl DISPATCH_FNSIG {
-  become path<table_t_make(pair_t{tokc::BUILTIN_TYPE, type_decl}), var_decl, 2>(DISPATCH_ARGS);
+  static const auto& a = path<table_t_make(pair_t{tokc::BUILTIN_TYPE, type_decl}), var_decl, 2>;
+  a(DISPATCH_ARGS);
+  // become path<table_t_make(),path<table_t_make(pair_t{tokc::BUILTIN_TYPE, type_decl}), var_decl, 2>>(DISPATCH_ARGS);
 }
 
+constexpr auto base_decls = table_t_make(
+    pair_t{tokc::ID, path<table_t_make(pair_t{tokc::COLON, decl},
+                                       pair_t{tokc::COLONASIGN, var_decl}),
+                          expr, 1>},
+    pair_t{tokc::LBRACE, unwrap_decl});
 
-constexpr auto base_table = table_t_make(
-                  pair_t{tokc::ID, path<table_t_make(pair_t{tokc::COLON, decl},pair_t{tokc::COLONASIGN, var_decl}),expr, 1>},
-                  // pair_t{tokc::LDBRACE, dive<medianc::TODO,sequence<dbraces<chain,medianc::ATTRIBUTES>, base>>},
-                  pair_t{tokc::LBRACE, unwrap_decl},
-                  pair_t{tokc::BUILTIN_IMPORT, import_fn},
-                  pair_t{tokc::BUILTIN_BECOME,advance2<medianc::BECOME, sequence<expr,expect<tokc::ENDSTMT>>>},
-                  pair_t{tokc::BUILTIN_FOR, for_fn},
-                  pair_t{tokc::BUILTIN_RETURN,advance2<medianc::RETURN, sequence<expr,expect<tokc::ENDSTMT>>>});
+constexpr auto base_return = table_t_make(
+    pair_t{tokc::BUILTIN_BECOME,
+           advance2<medianc::BECOME, sequence<expr, expect<tokc::ENDSTMT>>>},
+    pair_t{tokc::BUILTIN_RETURN,
+           advance2<medianc::RETURN, sequence<expr, expect<tokc::ENDSTMT>>>});
+constexpr auto base_loop = table_t_make(pair_t{tokc::BUILTIN_FOR, for_fn});
+
+constexpr auto base_misc =
+    table_t_make(pair_t{tokc::BUILTIN_IMPORT, import_fn});
+
+template<int n>
+consteval auto base_table_query() -> auto{
+  if constexpr (n == 0) {
+    return base_decls;
+  } else if constexpr (n == 1) {
+    return base_return;
+  } else if constexpr (n == 2) {
+    return base_loop;
+  } else if constexpr (n == 3) {
+    return base_misc;
+  }
+}
+
+constexpr auto base_table =
+    table_t_make<base_decls, base_return, base_loop, base_misc>();
+
+template<auto table = base_table>
+auto base_call DISPATCH_FNSIG{ become  path<table, expr>(DISPATCH_ARGS);}
 
 
-const auto& base_call = path<base_table, expr>;
+
 auto base DISPATCH_FNSIG {
-  become
-      dive<medianc::STMT,
-           path<table_t_make(pair_t{
-                    tokc::LDBRACE,
-                    sequence<dbraces<chain, medianc::ATTRIBUTES>, base_call>}),
-                base_call>>(DISPATCH_ARGS);
+  become attribute_path<
+      medianc::STMT,
+      base_call<table_t_make<base_decls, base_loop>()>, 
+      base_call>(DISPATCH_ARGS);
+  // become dive<medianc::STMT,
+  //             path<table_t_make(pair_t{
+  //                      tokc::LDBRACE,
+  //                      sequence<attributes,base_call<table_t_make<base_decls, base_return,base_loop>()>>}),
+  //                  base_call>>(DISPATCH_ARGS);
 }
 
 auto entry(const token_buffer_t &toks, cursor_t cursor, const cursor_t end) -> podlist_t<node_t> {
