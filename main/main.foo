@@ -120,3 +120,11 @@ main: @fn = (
 
    @ret 10;
 );
+
+
+a: @type = @rec{N: s32}(
+  [[public; align(64)]] a: s32;
+  [[private]] b: s32;
+
+  a: @fn([[restrict]] a: s32)  (s32) = (@ret 10;);
+);
