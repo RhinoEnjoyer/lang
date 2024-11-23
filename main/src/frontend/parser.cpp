@@ -1,6 +1,8 @@
 #include "./parser.hpp"
 #include "../become.hpp"
+#include <algorithm>
 #include <cassert>
+#include <tuple>
 #include <utility>
 
 
@@ -44,7 +46,11 @@ namespace parser {
 #define DISPATCH_LAM [] DISPATCH_FNSIG
 
 using fn_t = auto DISPATCH_FNSIG;
-using pair_t = std::pair<tokc::e,fn_t*>;
+// using pair_t = std::pair<tokc::e,fn_t*>;
+struct pair_t{
+  tokc::e first;
+  fn_t* second;
+};
 
 template <std::size_t N,typename T = pair_t>
 using table_t_impl = std::array<pair_t, N>;
@@ -134,13 +140,13 @@ template <tokc::e tok = tokc::VIRTUAL_EMPTY> auto push_final DISPATCH_FNSIG {
   become push_final_impl(DISPATCH_ARGS);
 }
 
-template <node_t::median_t::code_t type, auto FN>
+template <node_t::median_t::code_t type, fn_t* fn>
 auto dive DISPATCH_FNSIG {
   buffer.push_back(node_t::make(type, 0));
   const auto parent_index = buffer.length() - 1;
   const auto index = buffer.length();
 
-  FN(DISPATCH_ARGS);
+  fn(DISPATCH_ARGS);
 
   const auto length = buffer.length() - index;
   buffer.at(parent_index).as_median().len_ = length;
@@ -389,7 +395,7 @@ auto fn_sig DISPATCH_FNSIG{
       parens<attribute_path<medianc::ARGUMENT, path<table_t_make(pair_t{tokc::BUILTIN_SELF, dive<medianc::SELF_ARG,push_final<>>}),decl>>, medianc::FN_ARGS>(DISPATCH_ARGS);
       if (is<tokc::LPAREN>(cursor)) [[likely]]
         //Return type
-        parens<attribute_path<medianc::TODO ,type>, medianc::FN_RET>(DISPATCH_ARGS);
+        parens<attribute_path<medianc::ELEMENT ,type>, medianc::FN_RET>(DISPATCH_ARGS);
     }
   }
   > (DISPATCH_ARGS);
@@ -579,10 +585,6 @@ auto switch_fn DISPATCH_FNSIG;
 template <fn_t *intro = cbraces<type, medianc::COMPOUND_LITERAL_TYPE>>
 auto complit_fn DISPATCH_FNSIG ;
 
-#define TOKEN_OPERATOR(CODE) pair_t{tokc::CODE, push_final},
-constexpr auto symbol_operator_table = table_t_make(
-#include "../token.def"
-    pair_t{tokc::VIRTUAL_EMPTY, empty});
 
 namespace if_stmt {
 
@@ -612,7 +614,7 @@ auto fn DISPATCH_FNSIG {
 }
 } // namespace if_stmt
 
-constexpr auto compound_lit_table =
+static constexpr auto compound_lit_table =
     table_t_make(pair_t{tokc::LCBRACE, complit_fn},
                  pair_t{tokc::BUILTIN_FN, complit_fn<fn_sig>},
                  pair_t{tokc::BUILTIN_REC, complit_fn<record_fn>},
@@ -623,24 +625,55 @@ auto consume DISPATCH_FNSIG {
   become advance(DISPATCH_ARGS); 
 }
 
-constexpr auto expr_table = table_t_make<
-    symbol_operator_table,
+constexpr auto operand_expr_table = table_t_make<
     compound_lit_table,
-    table_t_make(pair_t{tokc::ID, chain},
-                 pair_t{tokc::LPAREN, result},
-                 pair_t{tokc::BUILTIN_SELF, custom_chain<medianc::SELF, consume<tokc::BUILTIN_SELF>>},
-                 pair_t{tokc::BUILTIN_PIPE, custom_chain< medianc::PIPE, consume<tokc::BUILTIN_PIPE>>},
-                 pair_t{tokc::BUILTIN_DUCKLING, init_list},
-                 pair_t{tokc::INT, push_final}, 
-                 pair_t{tokc::FLOAT, push_final},
-                 pair_t{tokc::STRLIT, push_final},
-                 pair_t{tokc::BUILTIN_NULL, push_final},
-                 pair_t{tokc::BUILTIN_IF, if_stmt::fn},
-                 pair_t{tokc::BUILTIN_SET, advance2<parens<expr,medianc::SET>>},
-                 pair_t{tokc::BUILTIN_SIZEOF, advance2<symetrical<type_or_expr, medianc::SIZEOF>>},
-                 pair_t{tokc::BUILTIN_AS, as},
-                 pair_t{tokc::BUILTIN_WHILE, while_fn} //this kinda moves a lot of work to the semantic analisys but it is ok
-                )>();
+    table_t_make(
+        pair_t{tokc::ID, chain}, 
+        pair_t{tokc::LPAREN, result},
+        pair_t{tokc::BUILTIN_SELF,custom_chain<medianc::SELF, consume<tokc::BUILTIN_SELF>>},
+        pair_t{tokc::BUILTIN_PIPE,custom_chain<medianc::PIPE, consume<tokc::BUILTIN_PIPE>>},
+        pair_t{tokc::BUILTIN_DUCKLING, init_list},
+        pair_t{tokc::INT, push_final}, 
+        pair_t{tokc::FLOAT, push_final},
+        pair_t{tokc::STRLIT, push_final},
+        pair_t{tokc::BUILTIN_NULL, push_final},
+        pair_t{tokc::BUILTIN_IF, if_stmt::fn},
+        pair_t{tokc::BUILTIN_SET, advance2<parens<expr, medianc::SET>>},
+        pair_t{tokc::BUILTIN_SIZEOF, advance2<symetrical<type_or_expr, medianc::SIZEOF>>},
+        pair_t{tokc::BUILTIN_WHILE, while_fn})>();
+
+#define TOKEN_OPERATOR(CODE) pair_t{tokc::CODE, push_final},
+constexpr auto symbol_operator_table = table_t_make(
+#include "../token.def"
+    pair_t{tokc::VIRTUAL_EMPTY, empty});
+
+constexpr auto operator_expr_table =
+    table_t_make<symbol_operator_table,
+                 table_t_make(pair_t{tokc::BUILTIN_AS, as})>();
+
+constexpr auto expr_table =
+    table_t_make<operand_expr_table, operator_expr_table>();
+
+
+// constexpr auto expr_table = table_t_make<
+//     symbol_operator_table,
+//     compound_lit_table,
+//     table_t_make(pair_t{tokc::ID, chain},
+//                  pair_t{tokc::LPAREN, result},
+//                  pair_t{tokc::BUILTIN_SELF, custom_chain<medianc::SELF, consume<tokc::BUILTIN_SELF>>},
+//                  pair_t{tokc::BUILTIN_PIPE, custom_chain<medianc::PIPE, consume<tokc::BUILTIN_PIPE>>},
+//                  pair_t{tokc::BUILTIN_DUCKLING, init_list},
+//                  pair_t{tokc::INT, push_final}, 
+//                  pair_t{tokc::FLOAT, push_final},
+//                  pair_t{tokc::STRLIT, push_final},
+//                  pair_t{tokc::BUILTIN_NULL, push_final},
+//                  pair_t{tokc::BUILTIN_IF, if_stmt::fn},
+//                  pair_t{tokc::BUILTIN_SET, advance2<parens<expr,medianc::SET>>},
+//                  pair_t{tokc::BUILTIN_SIZEOF, advance2<symetrical<type_or_expr, medianc::SIZEOF>>},
+//                  pair_t{tokc::BUILTIN_WHILE, while_fn}, //this kinda moves a lot of work to the semantic analisys but it is ok
+
+//                  pair_t{tokc::BUILTIN_AS, as}
+//                 )>();
 
 // if I droped generic types or generic expresions I could make something
 // but dropping generic types is not happening and dropping generic expresions
@@ -735,12 +768,17 @@ auto expr DISPATCH_FNSIG {
     consume(DISPATCH_ARGS);
     return;
   }
+  // static constexpr auto operand_codes = table_t_get_codes(operand_expr_table);
+  static constexpr auto operator_codes = table_t_get_codes(operator_expr_table);
+
   dive < medianc::EXPR, DISPATCH_LAM {
     do {
-      path<expr_table>(DISPATCH_ARGS);
+      if(is<operator_codes>(cursor))
+        dive<medianc::OPERATOR,path<operator_expr_table>>(DISPATCH_ARGS);
+      else 
+        dive<medianc::OPERAND,path<operand_expr_table>>(DISPATCH_ARGS);
     } while (LLVM_LIKELY(!is<tokc::ENDSTMT>(cursor)));
-  }
-  > (DISPATCH_ARGS);
+  }> (DISPATCH_ARGS);
 }
 
 auto var_decl DISPATCH_FNSIG {
@@ -813,8 +851,7 @@ auto unwrap_decl DISPATCH_FNSIG {
 
 auto decl DISPATCH_FNSIG {
   static const auto& a = path<table_t_make(pair_t{tokc::BUILTIN_TYPE, type_decl}), var_decl, 2>;
-  a(DISPATCH_ARGS);
-  // become path<table_t_make(),path<table_t_make(pair_t{tokc::BUILTIN_TYPE, type_decl}), var_decl, 2>>(DISPATCH_ARGS);
+  become a(DISPATCH_ARGS);
 }
 
 constexpr auto base_decls = table_t_make(
@@ -851,8 +888,6 @@ constexpr auto base_table =
 
 template<auto table = base_table>
 auto base_call DISPATCH_FNSIG{ become  path<table, expr>(DISPATCH_ARGS);}
-
-
 
 auto base DISPATCH_FNSIG {
   become attribute_path<

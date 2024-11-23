@@ -35,15 +35,15 @@ int main() {
     // constexpr double togb = 1024 * 1024 * 1024;
     static constexpr double togb = 1000 * 1000 * 1000;
 
-    for (auto i = buffer.toks.cbegin(); i != buffer.toks.cend(); ++i) {
-      std::cout << "token:" << token_code_str(i->type_) <<
-      "\n\t"
-                << "str:\"" << buffer.str(i) << "\"" << " pos:" << '{'
-                // << "depth:" << buffer.token_depth(i) << ' '
-                << "row:" << buffer.row(i) << ' '
-                << "col:" << buffer.col(i) << ' '
-                << "len:" << buffer.len(i) << '}' << '\n';
-    }
+    // for (auto i = buffer.toks.cbegin(); i != buffer.toks.cend(); ++i) {
+    //   std::cout << "token:" << token_code_str(i->type_) <<
+    //   "\n\t"
+    //             << "str:\"" << buffer.str(i) << "\"" << " pos:" << '{'
+    //             // << "depth:" << buffer.token_depth(i) << ' '
+    //             << "row:" << buffer.row(i) << ' '
+    //             << "col:" << buffer.col(i) << ' '
+    //             << "len:" << buffer.len(i) << '}' << '\n';
+    // }
     std::cout << "Lexer: " << lex_time.count() << "sec" << "\n"
               << "\tToken count: " << buffer.toks.size() << '\n'
               << "\tBuffer size in bytes: " << buffer.total_size_in_bytes()

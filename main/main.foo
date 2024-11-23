@@ -36,7 +36,7 @@ core: @scope = (
     make: @fn(allocator: core::allocator_t; len: u64)(array_t{T}) = 
       (@ret @as(^fptr{T})allocator::alloc(make_len(len)));
   );
-// a: @attribute{T: @type; V: s32} = ();
+  // a: @attribute{T: @type; V: s32} = ();
 
   arena_allocator_t: @type = @rec(
     len: u64;
@@ -103,15 +103,15 @@ main: @fn = (
   @for(a := @pipe; a < 10; a++)(a);
   @pipe -> @while(@pipe > 10)(@pipe += 10);
 
-  10 + 30 -> @pipe + @if(@pipe > 10){30}(@pipe < 5 ){35}{40};
+  10 + 30 -> @pipe + ([[consteval]]@if(@pipe > 10){30}(@pipe < 5 ){35}{40});
 
   a{1 - 0; s32} + @sizeof(s32);
 
   a: @typeof(10 + 30) = 10;
 
-  [[align(128)]] [a; b; c] := func_call();
-  [a; b; c] := @(10;20;30);
-  [a; b; c] := @rec(a: s32; b: s32; c: s32)::(10;20;30);
+  [a;b;c] := func_call();
+  [a;b;c] := @(10;20;30);
+  [a;b;c] := @rec(a: s32; b: s32; c: s32)::(10;20;30);
 
   b := (30)::a(10; 30)::a;
   [[chain]] 10;
@@ -126,5 +126,10 @@ a: @type = @rec{N: s32}(
   [[public; align(64)]] a: s32;
   [[private]] b: s32;
 
-  a: @fn([[restrict]] a: s32)  (s32) = (@ret 10;);
+  a: @fn([[restrict]] a: ^s32)(s32) = (@ret 10;);
 );
+
+
+a: @fn([[hallow]]@self)(s32; s32; s32) = (
+  @ret @self::b + 300 + 300;
+)
