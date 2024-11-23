@@ -700,8 +700,9 @@ auto type_or_expr DISPATCH_FNSIG {
           // gona use it for when we use
           // the correct function to parse
           // it and hijack the real parse
+          //we might segfault without it :)
           // tree
-          // buffer.push_back(node_t::make(cursor));
+          buffer.push_back(node_t::make(cursor));
           break;
         }
       }
