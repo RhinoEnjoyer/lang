@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <map>
 #include <array>
 #include <iostream>
 #include <utility>
@@ -47,6 +48,16 @@ struct node_t {
   [[nodiscard]] static auto make(cursor_t cursor) -> node_t { return node_t{final_t(cursor)}; }
   [[nodiscard]] static auto make(median_t::code_t type, std::int32_t len) -> node_t { return node_t{median_t{type, len}}; }
 };
+
+
+////////
+// struct vardecl_t{};
+// struct typedecl_t{};
+// using val = std::variant<vardecl_t, typedecl_t>;
+// struct rec_map; 
+// using map_val = std::variant<val, std::map<std::string, rec_map>>;
+// struct rec_map {map_val value;};
+////////
 
 auto entry(const token_buffer_t &toks, cursor_t cursor, const cursor_t end) -> podlist_t<node_t>;
 auto traverse(const token_buffer_t &buf, podlist_t<node_t> &buffer) -> void;

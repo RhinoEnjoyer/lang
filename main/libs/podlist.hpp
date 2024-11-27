@@ -129,7 +129,6 @@ struct podlist_t {
 
   auto& back() { return *(end() - 1); }
   auto& front() { return *(begin()); }
-
 #define PODLIST_GROWTH_FACTOR ((cap_ > 50000) ? 2 : 30.0)
   // #define PODLIST_GROWTH_FACTOR 1.1
   void push_back(T& val) {
@@ -245,7 +244,7 @@ struct podlist_t {
 
     pointer base() const { return ptr_; }
 
-    podlist_iterator_t& advance(len_t off = 1){
+    inline podlist_iterator_t& advance(len_t off = 1){
       ptr_ += off;
       return *this;
     }
@@ -270,4 +269,9 @@ struct podlist_t {
 
   const_iterator cbegin() const { return const_iterator(begin_); }
   const_iterator cend() const { return const_iterator(begin_ + len_); }
+
+  template <bool cit>
+  auto it2index(podlist_iterator_t<cit> it) const -> std::uint64_t {
+    return it.base() - begin_;
+  }
 };

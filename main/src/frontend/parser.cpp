@@ -2,9 +2,13 @@
 #include "../become.hpp"
 #include <algorithm>
 #include <cassert>
+#include <cstdlib>
+#include <optional>
 #include <tuple>
+#include <boost/container/flat_map.hpp>
 #include <utility>
-
+#include <variant>
+#include <functional> // for std::reference_wrapper
 
 //There is some jank about the use of ENDSTMT/; because sometimes it is checked by the called function
 //but sometimes it is checked and consumed by the symetrical function that is called
@@ -38,10 +42,18 @@
  *   and but make it like a chain? */
 namespace parser {
 
-#define DISPATCH_ARGS_DECL                                                     \
-  const token_buffer_t &toks, vec<node_t> &buffer,                             \
-      cursor_t &cursor                     /*, const cursor_t end*/
-#define DISPATCH_ARGS toks, buffer, cursor /*, end*/
+struct ctx_t{
+  const token_buffer_t &toks;
+  podlist_t<node_t> nodes;
+};
+
+// #define DISPATCH_ARGS_DECL                                                     \
+//   const token_buffer_t &toks, podlist_t<node_t> &buffer, cursor_t &cursor
+// #define DISPATCH_ARGS toks, buffer, cursor
+
+#define DISPATCH_ARGS_DECL ctx_t &ctx, cursor_t &cursor
+#define DISPATCH_ARGS ctx, cursor
+
 #define DISPATCH_FNSIG (DISPATCH_ARGS_DECL)->void
 #define DISPATCH_LAM [] DISPATCH_FNSIG
 
@@ -129,7 +141,7 @@ consteval auto table_t_get_codes(T t) -> std::array<tokc::e, t.size()> {
 }
 
 auto push_final_impl DISPATCH_FNSIG {
-  buffer.push_back(node_t::make(cursor));
+  ctx.nodes.push_back(node_t::make(cursor));
   advance(DISPATCH_ARGS);
 }
 
@@ -142,14 +154,14 @@ template <tokc::e tok = tokc::VIRTUAL_EMPTY> auto push_final DISPATCH_FNSIG {
 
 template <node_t::median_t::code_t type, fn_t* fn>
 auto dive DISPATCH_FNSIG {
-  buffer.push_back(node_t::make(type, 0));
-  const auto parent_index = buffer.length() - 1;
-  const auto index = buffer.length();
+  ctx.nodes.push_back(node_t::make(type, 0));
+  const auto parent_index = ctx.nodes.length() - 1;
+  const auto index = ctx.nodes.length();
 
   fn(DISPATCH_ARGS);
 
-  const auto length = buffer.length() - index;
-  buffer.at(parent_index).as_median().len_ = length;
+  const auto length = ctx.nodes.length() - index;
+  ctx.nodes.at(parent_index).as_median().len_ = length;
 }
 
 template <std::array type>
@@ -164,10 +176,10 @@ become is<std::array{type...}>(cursor);
 }
 
 template <const tokc::e... type> auto expected DISPATCH_FNSIG {
-  std::cerr << "Found str: \'" << toks.str(cursor) << "\'"
-            << "\n\tType: " << toks.str(cursor)
-            << "\n\tRow: " << toks.row(cursor) << "\tCol: " << toks.col(cursor)
-            << "\tLen: " << toks.len(cursor) << "\n";
+  std::cerr << "Found str: \'" << ctx.toks.str(cursor) << "\'"
+            << "\n\tType: " << ctx.toks.str(cursor)
+            << "\n\tRow: " << ctx.toks.row(cursor) << "\tCol: " << ctx.toks.col(cursor)
+            << "\tLen: " << ctx.toks.len(cursor) << "\n";
 
   std::cerr << "Expected: ";
   ((std::cerr << token_code_str(type) << " "), ...);
@@ -222,11 +234,11 @@ auto path DISPATCH_FNSIG {
             return result;
           }();
 
-          std::cerr << "Str: \'" << toks.str(cursor) << "\'"
-                       << "\n\tType: " << token_code_str(toks.type(cursor))
-                       << "\n\tRow: " << toks.row(cursor)
-                       << "\tCol: " << toks.col(cursor)
-                       << "\tLen: " << toks.len(cursor) << "\n";
+          std::cerr << "Str: \'" << ctx.toks.str(cursor) << "\'"
+                       << "\n\tType: " << token_code_str(ctx.toks.type(cursor))
+                       << "\n\tRow: " << ctx.toks.row(cursor)
+                       << "\tCol: " << ctx.toks.col(cursor)
+                       << "\tLen: " << ctx.toks.len(cursor) << "\n";
           std::cerr << "Failed to pick a path" << '\n' << "Expected: \n\t";
 
           for (const auto &elm : filter)
@@ -245,7 +257,7 @@ auto path DISPATCH_FNSIG {
     return table;
   }();
 
-  become dispatch_table[(cursor + match_cursor_offset)->type_](toks, buffer,cursor);
+  become dispatch_table[(cursor + match_cursor_offset)->type_](ctx,cursor);
 }
 
 template<fn_t* fn, fn_t*... fns>
@@ -271,7 +283,7 @@ auto symetrical_impl DISPATCH_FNSIG {
   advance(DISPATCH_ARGS);
   if (is<tokc::ENDGROUP>(cursor)) [[unlikely]] {
     advance(DISPATCH_ARGS);
-    return buffer.push_back(node_t::make(med, 0));
+    return ctx.nodes.push_back(node_t::make(med, 0));
   }
   dive < med, DISPATCH_LAM {
     do {
@@ -388,7 +400,7 @@ auto fn_sig DISPATCH_FNSIG{
 
     //Compile time arguments declaration
     if (is<tokc::LCBRACE>(cursor)) [[unlikely]]
-      symetrical<attribute_path<medianc::ARGUMENT,decl>, medianc::COMPTIME_LIST_DECL>(DISPATCH_ARGS);
+      symetrical<attribute_path<medianc::ARGUMENT,decl>, medianc::TEMPLATE_LIST_DECL>(DISPATCH_ARGS);
     
     if (is<tokc::LPAREN>(cursor)) [[likely]] {
       //Runtime Arguments
@@ -423,9 +435,9 @@ auto result DISPATCH_FNSIG {
 constexpr auto chain_1_table = table_t_make(
     pair_t{tokc::ID, push_final});
 constexpr auto chain_2_table = table_t_make(
-    pair_t{tokc::LPAREN, parens<base>}, 
-    pair_t{tokc::LBRACE, braces<expr>},
-    pair_t{tokc::LCBRACE,cbraces<comptime_arg, medianc::COMPTIME_ARGUMENT_LIST>});
+    pair_t{tokc::LPAREN, parens<base,medianc::FUNCTION_CALL>}, 
+    pair_t{tokc::LBRACE, braces<expr,medianc::ARRAY_ACCESS>},
+    pair_t{tokc::LCBRACE,cbraces<comptime_arg, medianc::TEMPLATE_INSTATIATION>});
 
 [[clang::always_inline]]
 inline auto chain_mid DISPATCH_FNSIG {
@@ -482,7 +494,7 @@ auto enum_impl DISPATCH_FNSIG {
 }
 
 auto comptime_arglist DISPATCH_FNSIG {
-  become cbraces<attribute_path<medianc::ARGUMENT,decl>, medianc::COMPTIME_ARGUMENT_LIST>(DISPATCH_ARGS);
+  become cbraces<attribute_path<medianc::ARGUMENT,decl>, medianc::TEMPLATE_ARGUMENT_LIST>(DISPATCH_ARGS);
 }
 
 template<fn_t* elm, medianc::e med>
@@ -523,21 +535,22 @@ constexpr auto type_table = table_t_make<
         pair_t{tokc::BUILTIN_TYPEOF,
                dive<medianc::TYPE,
                     sequence<advance, symetrical<expr, medianc::TYPEOF>>>},
-        pair_t{tokc::BUILTIN_PTR, dive<medianc::TYPE, push_final<>>},
-        pair_t{tokc::BUILTIN_SCOPE,
-            dive<medianc::TYPE,dive<medianc::SCOPE,sequence<advance, path<table_t_make(pair_t{tokc::LCBRACE, comptime_arglist}), // @TODO: ????? this should be somethign else, check aggregate_decl functon if it can be used here
-                                             empty>>>>})>();
+        pair_t{tokc::BUILTIN_PTR, dive<medianc::TYPE, push_final<>>}
 
-auto get_index(vec<node_t>& buffer) -> std::uint64_t{
-  return buffer.size();
+        // pair_t{tokc::BUILTIN_SCOPE,dive<medianc::TYPE,dive<medianc::SCOPE,sequence<advance, path<table_t_make(pair_t{tokc::LCBRACE, comptime_arglist}), // @TODO: ????? this should be somethign else, check aggregate_decl functon if it can be used here
+        //                                      empty>>>>}
+                                           )>();
+
+auto get_index(podlist_t<node_t>& nodes) -> std::uint64_t{
+  return nodes.size();
 }
 
 
 template<fn_t* fn>
 auto extend(std::uint64_t index,DISPATCH_ARGS_DECL){
   fn(DISPATCH_ARGS);
-  auto length = buffer.length() - index;
-  buffer.at(index).as_median().len_ = length;
+  auto length = ctx.nodes.length() - index;
+  ctx.nodes.at(index).as_median().len_ = length;
 };
 
 
@@ -702,7 +715,7 @@ auto type_or_expr DISPATCH_FNSIG {
           // it and hijack the real parse
           //we might segfault without it :)
           // tree
-          buffer.push_back(node_t::make(cursor));
+          ctx.nodes.push_back(node_t::make(cursor));
           break;
         }
       }
@@ -782,8 +795,13 @@ auto expr DISPATCH_FNSIG {
   }> (DISPATCH_ARGS);
 }
 
+
 auto var_decl DISPATCH_FNSIG {
   dive < medianc::DECL, DISPATCH_LAM {
+
+    // auto name = ctx.toks.str(cursor);
+    // local_scope.insert(name, vardecl_t{ctx.nodes.size()+1});
+
     push_final(DISPATCH_ARGS);
 
     const auto must_infer_type = [&] -> bool {
@@ -795,7 +813,7 @@ auto var_decl DISPATCH_FNSIG {
         expected<"Declaration needs a type ,attribute list, and/or mutability specifier",
                  tokc::ENDSTMT>(DISPATCH_ARGS);
       if (is<tokc::BUILTIN_MUTABLE, tokc::BUILTIN_IMMUTABLE>(cursor)) [[unlikely]] {
-        buffer.push_back(node_t::make(cursor));
+        ctx.nodes.push_back(node_t::make(cursor));
         advance(DISPATCH_ARGS);
       }
 
@@ -829,11 +847,35 @@ auto var_decl DISPATCH_FNSIG {
 
 auto type_decl DISPATCH_FNSIG {
   dive<medianc::TYPE_DECL,
-       sequence<push_final, advance<2>,
-                path<table_t_make(pair_t{tokc::ASIGN,
-                                         sequence<consume<tokc::ASIGN>, type>}),
-                     empty>,
-                expect<tokc::ENDSTMT>>>(DISPATCH_ARGS);
+       sequence<
+  // DISPATCH_LAM{
+  //   local_scope.insert(ctx.toks.str(cursor),
+  //                      vardecl_t{ctx.nodes.size()+1});
+  // }, 
+      push_final, advance<2>,
+      path<table_t_make(
+               pair_t{tokc::ASIGN, sequence<consume<tokc::ASIGN>, type>}),
+           empty>,
+      expect < tokc::ENDSTMT >>> (DISPATCH_ARGS);
+}
+auto scope_decl DISPATCH_FNSIG {
+  // dive<medianc::SCOPE_DECL,
+  //      sequence<DISPATCH_LAM{
+  //      auto name = ctx.toks.str(cursor);
+  //    },push_final, advance<2>,
+  //               sequence<consume<tokc::ASIGN>, parens<base, medianc::BODY>>,
+  //               expect<tokc::ENDSTMT>>>(DISPATCH_ARGS);
+  dive<medianc::SCOPE_DECL,
+       DISPATCH_LAM{
+       auto name = ctx.toks.str(cursor);
+       // local_scope.ascend_err(name);
+
+       push_final(DISPATCH_ARGS);
+       cursor.advance(2);
+       sequence<consume<tokc::ASIGN>, parens<base, medianc::BODY>>(ctx, cursor);
+       expect<tokc::ENDSTMT>(DISPATCH_ARGS);
+  }
+  > (DISPATCH_ARGS);
 }
 
 
@@ -842,7 +884,8 @@ auto import_fn DISPATCH_FNSIG {
               advance2<sequence<expect<tokc::STRLIT>, push_final,
                                 expect<tokc::ENDSTMT>>>>(DISPATCH_ARGS);
 }
-auto unwrap_decl DISPATCH_FNSIG {
+
+auto unwrap_decl DISPATCH_FNSIG { //
   become dive<
       medianc::UNWRAP_DECL,
       sequence<braces<push_final<tokc::ID>, medianc::UNWRAP_IDS>,
@@ -851,7 +894,10 @@ auto unwrap_decl DISPATCH_FNSIG {
 }
 
 auto decl DISPATCH_FNSIG {
-  static const auto& a = path<table_t_make(pair_t{tokc::BUILTIN_TYPE, type_decl}), var_decl, 2>;
+  static const auto &a =
+      path<table_t_make(pair_t{tokc::BUILTIN_SCOPE, scope_decl},
+                        pair_t{tokc::BUILTIN_TYPE, type_decl}),
+           var_decl, 2>;
   become a(DISPATCH_ARGS);
 }
 
@@ -871,19 +917,6 @@ constexpr auto base_loop = table_t_make(pair_t{tokc::BUILTIN_FOR, for_fn});
 constexpr auto base_misc =
     table_t_make(pair_t{tokc::BUILTIN_IMPORT, import_fn});
 
-template<int n>
-consteval auto base_table_query() -> auto{
-  if constexpr (n == 0) {
-    return base_decls;
-  } else if constexpr (n == 1) {
-    return base_return;
-  } else if constexpr (n == 2) {
-    return base_loop;
-  } else if constexpr (n == 3) {
-    return base_misc;
-  }
-}
-
 constexpr auto base_table =
     table_t_make<base_decls, base_return, base_loop, base_misc>();
 
@@ -895,17 +928,170 @@ auto base DISPATCH_FNSIG {
       medianc::STMT,
       base_call<table_t_make<base_decls, base_loop>()>, 
       base_call>(DISPATCH_ARGS);
-  // become dive<medianc::STMT,
-  //             path<table_t_make(pair_t{
-  //                      tokc::LDBRACE,
-  //                      sequence<attributes,base_call<table_t_make<base_decls, base_return,base_loop>()>>}),
-  //                  base_call>>(DISPATCH_ARGS);
 }
 
-auto entry(const token_buffer_t &toks, cursor_t cursor, const cursor_t end) -> podlist_t<node_t> {
-  auto buffer = podlist_t<node_t>::create(64);
-  symetrical<base,medianc::FILE>(DISPATCH_ARGS);
-  return buffer;
+
+
+namespace symbol_table{
+  struct scope_t;
+
+  struct unwrapdecl_t {
+    podlist_t<node_t>::c_it node;
+  };
+  struct typedecl_t {
+    podlist_t<node_t>::c_it node;
+  };
+  struct vardecl_t {
+    podlist_t<node_t>::c_it node;
+  };
+  using decl_var = std::variant<vardecl_t, typedecl_t>;
+  struct decl_t : decl_var {
+    using decl_var::variant;
+  };
+
+  using entry_var = std::variant<std::monostate, decl_t, scope_t>;
+  struct scope_t{
+    scope_t* parent;
+    std::string_view name;
+    using pair = std::pair<scope_t*, entry_var>;
+    boost::container::flat_map<std::string_view, pair> local;
+
+    auto local_lookup(std::string_view name) -> std::optional<std::reference_wrapper<pair>>{
+      auto result = local.find(name);
+      if (result != local.end())
+        return result->second;
+      return std::nullopt;
+    }
+
+    auto ascend_lookup(std::string_view key) -> std::optional<std::reference_wrapper<pair>>{
+      for (scope_t *current = this; current != nullptr;
+           current = current->parent) {
+       auto result = current->local.find(key);
+       if (current->local.find(key) != current->local.end())
+         return result->second;
+      }
+      return std::nullopt;
+    }
+
+    auto ascend_err(std::string_view key) -> void {
+      auto result = ascend_lookup(key);
+      if (result.has_value()) [[unlikely]] {
+        std::cerr << "Symbol conflict:" << name << " \'" << std::string(key)
+                  << "\' already exists in scope \'"
+                  << result.value().get().first->name << '\''
+                  << '\n';
+        std::abort();
+      }
+    }
+
+    auto insert(std::string_view key, entry_var val){
+      ascend_err(key);
+      local[key] = {this,val};
+    }
+
+    auto dive(std::string_view cname) -> scope_t&{
+      //ascend check{
+        // check every parent scope above this one
+        // and check this one as well
+        // do not step in any child scope
+      //}
+        
+      auto r = ascend_lookup(cname);
+      if (r.has_value()){
+        auto& val = r->get().second;
+        if(std::holds_alternative<scope_t>(val))
+          return std::get<scope_t>(val);
+        else {
+          std::cerr << "Symbol conflict" << std::endl;
+          std::abort();
+        }
+      }
+      auto &new_scope = local[cname];
+      new_scope = {this,scope_t{this, cname}};
+      return std::get<scope_t>(new_scope.second);
+    }
+  };
+  
+  using ncursor_t = podlist_t<node_t>::c_it;
+
+  auto handle_stmt_list(const ctx_t &ctx, scope_t& scope, ncursor_t cursor)-> void  ;
+  auto handle_stmt(const ctx_t &ctx, scope_t &scope, ncursor_t cursor) -> void;
+
+  auto handle_vardecl(const ctx_t &ctx, scope_t& scope, ncursor_t cursor) -> void {
+    cursor++;
+    auto name = ctx.toks.str(cursor->as_final());
+    scope.insert(name, vardecl_t{cursor});
+  }
+  auto handle_typedecl(const ctx_t &ctx, scope_t& scope, ncursor_t cursor) -> void {
+    cursor++;
+    auto name = ctx.toks.str(cursor->as_final());
+    scope.insert(name, typedecl_t{cursor});
+  }
+  auto handle_scopedecl(const ctx_t &ctx, scope_t& scope, ncursor_t cursor) -> void {
+    cursor++;
+    auto name = ctx.toks.str(cursor->as_final());
+    auto &newscope = scope.dive(name);
+    cursor.advance();
+
+    auto med = cursor->as_median();
+    if(med.len_ == 0) 
+        return;
+
+    become handle_stmt_list(ctx, newscope, cursor);
+  }
+  auto handle_unwrapdecl(const ctx_t &ctx, scope_t& scope, ncursor_t cursor)-> void  {
+    std::cerr << __PRETTY_FUNCTION__ << " todo" << std::endl;
+    std::abort();
+  }
+
+  auto handle_stmt(const ctx_t &ctx, scope_t&  scope, ncursor_t cursor)-> void  {
+    cursor.advance();
+    const auto& med = cursor->as_median();
+    switch (med.type_) {
+      case medianc::UNWRAP_DECL:
+        handle_unwrapdecl(ctx, scope, cursor);break;
+      case medianc::TYPE_DECL:
+        handle_typedecl(ctx, scope, cursor);break;
+      case medianc::DECL:
+        handle_vardecl(ctx, scope, cursor);break;
+      case medianc::SCOPE_DECL:
+        handle_scopedecl(ctx, scope, cursor);break;
+      default: {
+        std::cerr << "Index: " << ctx.nodes.it2index(cursor) << std::endl;
+        std::abort();
+      }
+      }
+  }
+
+  auto handle_stmt_list(const ctx_t &ctx, scope_t& scope, ncursor_t cursor)-> void{
+    const auto end = cursor + cursor->as_median().len_;
+    cursor++;
+    while (cursor.base() <= end.base()) {
+      const auto &med = cursor->as_median();
+      if (med.type_ != medianc::STMT) {
+        std::cerr << __func__ << " " << "Failed to find a stmt" << std::endl;
+        std::cerr << "Index: " << ctx.nodes.it2index(cursor) << std::endl;
+        std::abort();
+      }
+      handle_stmt(ctx, scope, cursor);
+      cursor.advance(med.len_+1);
+    }
+  }
+
+  auto create(const ctx_t &ctx) -> scope_t {
+    auto scope = scope_t{nullptr};
+    handle_stmt_list(ctx, scope, ctx.nodes.begin());
+    return scope;
+  }
+  } // namespace symbol_table
+
+auto entry(const token_buffer_t &toks, cursor_t cursor,const cursor_t end) -> podlist_t<node_t> {
+  auto ctx =
+      ctx_t{toks, podlist_t<node_t>::create(64)};
+
+  symetrical<base, medianc::FILE>(ctx, cursor);
+  auto stable = symbol_table::create(ctx);
+  return std::move(ctx.nodes);
 }
 
 template <class... Ts> struct overloaded : Ts... {
@@ -920,8 +1106,8 @@ auto traverse_impl(const token_buffer_t &buf, vec<node_t>::it &cursor,
 
 #define space_str std::string(depth *depth_mult, ' ')
 #define print std::cout << space_str << depth << "|"
+    while (cursor != end) {
 
-  while (cursor != end) {
     // People say std::visit is slow and it has heap allocations?
     std::visit(overloaded{[&](node_t::final_t &val) {
                             {
