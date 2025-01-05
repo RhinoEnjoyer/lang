@@ -1,166 +1,47 @@
-#include <functional>
 #include <llvm/Support/VirtualFileSystem.h>
-#include <map>
-#include <optional>
-#include <span>
-#include <string_view>
-#include <type_traits>
 #include <unistd.h>
 
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <utility>
-#include <variant>
 
 #include "./frontend/lexer.hpp"
 #include "./frontend/parser.hpp"
+// #include "./frontend/semantics.hpp"
 #include "./source_buffer.hpp"
-#include "median_enum.hpp"
 #include "mesure.hpp"
+#include "./frontend/semantics3.hpp"
 #include "token.hpp"
-#include "become.hpp"
-#include "token_str.hpp"
 
-// ////////////
-//   struct parser2{
-
-//   struct ctx_t{
-//     token_buffer_t& toks;
-//   } ctx;
-  
-    
-//   using cursor_t = podlist_t<parser::node_t>::c_it;
-
-//   struct id_t{
-//     std::string_view name;
-//     id_t(std::string_view n): name(n) {}
-//   };
-
-//   struct scope_access_list_t{
-//     podlist_t<id_t> list;  
-//   };
-
-//   struct symbol_t{
-//     scope_access_list_t scope;
-//     id_t name;
-//   };
-
-//   using type_var = std::variant<std::monostate, symbol_t>;
-//   struct type_t: public type_var {
-//     using type_var::variant;
-//   };
-
-//   struct operand_t {};
-
-//   struct as_t {
-//     type_t type;
-//   };
-
-
-//   struct plus_t{};
-//   struct minus_t{};
-//   struct lop_t{};
-//   struct rop_t{};
-
-//   using operator_var  = std::variant<std::monostate, lop_t, rop_t>;
-//   struct operator_t: operator_var {
-//     using operator_var::variant;
-//   };
-
-//   using expr_elm_var = std::variant<std::monostate, operand_t, operator_t>;
-//   struct expr_t {
-//     podlist_t<expr_elm_var> list;
-//   };
-
-//   struct attribute_t {};
+#include <fmt/format.h>
+#include <fmt/printf.h>
 
 
 
-//   struct decl_t {
-//     podlist_t<attribute_t> attributes;
-//     std::string_view name;
-//     type_t type;
-//   };
+auto print_token_buffer(token_buffer_t& buffer){
+  constexpr int TYPE_WIDTH = 15;
+  constexpr int STRING_WIDTH = 20;
+  constexpr int ROW_WIDTH = 10;
+  constexpr int LENGTH_WIDTH = 10;
+  constexpr int COLUMN_WIDTH = 10;
+  // Print header
+  fmt::print("{:<{}} | {:<{}} | {:<{}} | {:<{}} | {:<{}}\n", "TYPE", TYPE_WIDTH,
+             "STRING", STRING_WIDTH, "ROW", ROW_WIDTH, "COLUMN", COLUMN_WIDTH,
+             "LENGTH", LENGTH_WIDTH);
+  fmt::print("{:-<{}}-+-{:-<{}}-+-{:-<{}}-+-{:-<{}}-+-{:-<{}}\n", "",
+             TYPE_WIDTH, "", STRING_WIDTH, "", ROW_WIDTH, "", COLUMN_WIDTH, "",
+             LENGTH_WIDTH);
 
-//   using val_var = std::variant<std::monostate, expr_t>;
-//   struct val_t: public val_var {
-//     using val_var::variant;
-//   };
-//   struct vardecl_t {
-//     decl_t info;
-//     val_t value;
-//   };
+  // Loop through tokens and print rows
+  for (auto i = buffer.toks.cbegin(); i != buffer.toks.cend(); ++i) {
+    fmt::print("{:<{}} | {:<{}} | {:<{}} | {:<{}} | {:<{}}\n",
+               token_code_str(i->type_), TYPE_WIDTH, buffer.str(i),
+               STRING_WIDTH, buffer.row(i), ROW_WIDTH, buffer.col(i),
+               COLUMN_WIDTH, buffer.len(i), LENGTH_WIDTH);
+    }
 
-//   struct import_t {std::string_view file;};
-
-//   using stmt_var = std::variant<std::monostate,expr_t, vardecl_t, import_t>;
-//   struct stmt_t: public stmt_var{
-//     using stmt_var::variant;
-//   };
-
-
-//   auto type(cursor_t& cursor, const cursor_t end) -> type_t{
-//     auto med = cursor->as_median();
-//     cursor.advance();
-//     if(med.type_ == medianc::CHAIN){
-//       auto scopes = scope_access_list_t{};
-//       if (med.len_ > 1)
-//         for (int i = 0; i < med.len_ - 1; i++) {
-//           scopes.list.push_back(ctx.toks.str(cursor->as_final()));
-//           cursor.advance();
-//           //a type can be considered also a scope
-//           //or it might be collection
-//           //but also scopes
-//           //they might have compiletime arguments
-//           if(cursor->is_median()){
-//             std::cerr << "We can have cbraces as part of the syntax to "
-//                          "indicate that a scope/namespace"
-//                          " has a compile time feature but for now I don't "
-//                          "support it and we do pure scopes on the syntax level"
-//                          "\n";
-//               std::abort();
-//           }
-//         }
-//       return symbol_t{std::move(scopes), ctx.toks.str(cursor->as_final())};
-//     }
-
-//     return std::monostate{};
-//   }
-//   static auto call(auto fn, auto* t, cursor_t& cursor) -> auto{
-//     auto med = cursor->as_median();
-//     cursor++;
-//     return fn(t, cursor, cursor + med.len_);
-//   }
-//   auto vardecl(cursor_t& cursor, const cursor_t end) -> vardecl_t{
-
-//     auto attribs = podlist_t<attribute_t>{};
-//     auto& n = cursor->as_final();
-//     cursor++;
-//     auto t = call(std::mem_fn(&parser2::type),this,cursor);
-//     auto val = [&] -> val_t{
-//       if(cursor == end)
-//         return std::monostate{};
-//       else
-//         // return call(std::mem_fn(&parser2::exp));
-//     }();
-
-//     return vardecl_t{{std::move(attribs), ctx.toks.str(n), std::move(t)}, val};
-//   }
-//   auto stmt(cursor_t& cursor, const cursor_t end) -> stmt_t{
-//     cursor++;
-//     if (cursor->is_median()) [[likely]] {
-//       auto& med = cursor->as_median();
-//       if (med.type_ == medianc::DECL) 
-//         return call(std::mem_fn(&parser2::vardecl), this, cursor);
-//       return std::monostate{};
-//     }  
-
-//     std::unreachable();
-//     return {};
-//   }
-//   };
-// ////////////
+}
 
 
 int main() {
@@ -180,25 +61,16 @@ int main() {
     std::cout << '\t' << src.length() << " bytes" << "\n\n";
 
 
-    auto [buffer, lex_time] = mesure([&] { return lexer::entry(&src); });
-    buffer.toks.shrink_to_fit();
-    buffer.locs.shrink_to_fit();
+    auto [lex_output, lex_time] = mesure([&] { return lexer::entry(&src); });
 
     // constexpr double togb = 1024 * 1024 * 1024;
     static constexpr double togb = 1000 * 1000 * 1000;
+    auto &buffer = lex_output;
+    print_token_buffer(buffer);
 
-    // for (auto i = buffer.toks.cbegin(); i != buffer.toks.cend(); ++i) {
-    //   std::cout << "token:" << token_code_str(i->type_) <<
-    //   "\n\t"
-    //             << "str:\"" << buffer.str(i) << "\"" << " pos:" << '{'
-    //             // << "depth:" << buffer.token_depth(i) << ' '
-    //             << "row:" << buffer.row(i) << ' '
-    //             << "col:" << buffer.col(i) << ' '
-    //             << "len:" << buffer.len(i) << '}' << '\n';
-    // }
-    std::cout << "Lexer: " << lex_time.count() << "sec" << "\n"
-              << "\tToken count: " << buffer.toks.size() << '\n'
-              << "\tBuffer size in bytes: " << buffer.total_size_in_bytes()
+    std::cout << "Lexer: " << lex_time << "\n"
+              << "\tToken count: " << lex_output.toks.size() << '\n'
+              << "\tBuffer size in bytes: " << lex_output.total_size_in_bytes()
               << '\n'
 
               << "\tProccess Speed: "
@@ -207,8 +79,8 @@ int main() {
               << " GBytes/Sec" << '\n'
 
               << "\tGeneration Speed: "
-              << (static_cast<double>(buffer.toks.size_in_bytes() +
-                                      buffer.locs.size_in_bytes()) /
+              << (static_cast<double>(lex_output.toks.size_in_bytes() +
+                                      lex_output.locs.size_in_bytes()) /
                   togb) /
                      lex_time.count()
               << " GBytes/Sec" << '\n'
@@ -224,27 +96,33 @@ int main() {
 
     //heaptracker shows that alot of allocations are done by std::variant or std::visit or at least they are realated to it?
 
-    auto [parser_tree, parser_time] = mesure([&] {
-      return parser::entry(buffer, buffer.toks.cbegin(), buffer.toks.cend());
+    auto [parser_output, parser_time] = mesure([&] {
+      return parser::entry(lex_output, lex_output.toks.cbegin(),
+                           lex_output.toks.cend());
     });
+    auto &parser_tree = parser_output;
 
-    // parser::traverse(buffer, parser_tree);
+    parser::traverse(lex_output, parser_tree);
     std::cout << "\n"
-              << "Parser token tree: " << parser_time << "\n"
+              << "Parser: " << parser_time << "\n"
               << "\tLength: " << parser_tree.length() << "\n"
               << std::endl;
 
+    auto [table, semantics_time] =
+        mesure([&] { return semantics::entry(parser_output, lex_output); });
 
-    
-  
+    // semantics::visit(table);
+    std::cout << "Semantics: " << semantics_time << std::endl;
+
     parser_tree.release();
-    buffer.locs.release();
-    buffer.toks.release();
+    lex_output.locs.release();
+    lex_output.toks.release();
   };
 
   std::cout.imbue(std::locale("en_US.UTF-8"));
   auto fs = llvm::vfs::getRealFileSystem();
-  lam(fs, "../main2.foo");
+  lam(fs, "../main.foo");
+  // lam(fs, "../main2.foo");
 
   return 0;
 }

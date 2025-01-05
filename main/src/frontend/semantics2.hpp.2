@@ -1,0 +1,542 @@
+#pragma once
+
+#include "../overloaded.hpp"
+#include "parser.hpp"
+#include <map>
+#include <memory>
+#include <optional>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+namespace semantics {
+template <typename T> using opt = std::optional<T>;
+template <typename T> using sptr = std::shared_ptr<T>;
+template <typename T> using uptr = std::unique_ptr<T>;
+template <typename... T> using var = std::variant<T...>;
+
+// struct name_t {
+//   std::string_view name;
+//   explicit name_t(std::string_view view) : name(std::move(view)) {}
+// };
+
+struct decl_t;
+struct locale_t {
+  sptr<locale_t> parent;
+  using var = sptr<decl_t>;
+  using lookup_t = opt<std::pair<locale_t*, var>>;
+  std::map<std::string_view, var> table;
+
+  locale_t(sptr<locale_t> p) : parent(p) {}
+  locale_t() : parent(nullptr) {}
+
+  auto insert(std::string_view name, locale_t::var val) -> auto {
+    return this->table.try_emplace(name, val);
+  }
+
+  template <bool local_search = false>
+  auto lookup(const std::string_view name) -> lookup_t {
+    auto it = table.find(name);
+    // std::cout << __func__ << " " << name << '\n';
+
+    // for(auto& elm: table)
+    //   std::cout << "elm: " << elm.first << "\n";
+    // std::cout << "\n";
+    
+    if (it != table.end())
+      return std::pair{this, it->second};
+
+    if constexpr (!local_search) {
+      if (parent)
+        return parent->lookup<local_search>(name);
+    }
+    return std::nullopt;
+  }
+};
+
+struct environment_t {
+  sptr<locale_t> symbols;
+  // Constructors
+  environment_t() = default;
+  environment_t(sptr<locale_t> ptr) : symbols(ptr) {}
+
+
+  // locale_t *operator->() const { return symbols.operator->(); }
+  // locale_t &operator*() const { return *symbols; }
+
+  bool operator==(const environment_t &other) const {
+    return symbols == other.symbols;
+  }
+  bool operator!=(const environment_t &other) const {
+    return symbols != other.symbols;
+  }
+
+  // void reset() { symbols.reset(); }
+  // void reset(locale_t *ptr) { symbols.reset(ptr); }
+  // sptr<locale_t> get() const { return symbols; }
+  // auto lookup(auto name) -> auto { return symbols->lookup(name); }
+
+  // bool is_null() const { return symbols == nullptr; }
+};
+
+struct decl_t {
+  std::string_view name;
+  decl_t(std::string_view n) : name(n) {}
+  virtual ~decl_t() = default;
+};
+
+// template <typename Base, typename Derived>
+// struct eq_crp_t {
+//   bool operator==(const sptr<Base> &other) const {
+//     auto otherrec = std::dynamic_pointer_cast<Derived>(other);
+//     if (otherrec == nullptr)
+//       return false;
+//     return *this == otherrec;
+//   }
+//   virtual bool operator==(const sptr<Derived> &other) const = 0;
+//   virtual ~eq_crp_t() = default; // Virtual destructor for proper cleanup
+// };
+
+struct type_t {
+  virtual ~type_t() = default;
+  virtual bool operator==(const sptr<type_t> &other) const = 0;
+};
+
+#define type_eq                                                                \
+  bool operator==(const sptr<type_t> &other) const {                           \
+    using this_type = typename std::remove_cv<                                 \
+        typename std::remove_reference<decltype(*this)>::type>::type;          \
+    auto otherrec = std::dynamic_pointer_cast<this_type>(other);               \
+    if (otherrec == nullptr)                                                   \
+      return false;                                                            \
+    return *this == otherrec;                                                  \
+  };
+
+struct type_testing_t : public type_t {
+  type_eq;
+  virtual bool operator==(const sptr<type_testing_t> &other) const {
+    return true;
+  }
+
+};
+
+struct fnsig_t : public type_t{
+  type_eq;
+  opt<environment_t> env;
+  opt<sptr<type_t>> ret;
+
+  fnsig_t(opt<sptr<locale_t>> loc, opt<sptr<type_t>> r) : env(loc), ret(r) {}
+  bool operator==(const sptr<fnsig_t> &other) const {
+    // Check for self-comparison
+    if (this == other.get())
+      return true;
+
+    // Compare environments
+    if (env != other->env)
+      return false;
+
+    // Compare return types
+    if (ret != other->ret)
+      return false;
+
+    // If all checks pass, the two function signatures are equal
+    return true;
+  }
+};
+
+struct rec_t : public type_t, public environment_t {
+  rec_t(sptr<locale_t> loc) : environment_t(loc) {}
+  type_eq;
+  bool operator==(const sptr<rec_t> &other) const {
+    if (this == other.get())
+      return true;
+    auto &table = symbols->table;
+    auto &othertable = other->symbols->table;
+    return table == othertable;
+  }
+};
+
+struct integral_t : public type_t {
+  integral_t() = default;
+  integral_t(size_t size) : bit_size(size) {}
+  integral_t(std::string_view str)
+      : bit_size(std::stoull(std::string(str.substr(1)))) {}
+
+  type_eq;
+
+  size_t bit_size;
+  virtual bool operator==(const sptr<integral_t> &other) const {
+    return (bit_size == other->bit_size);
+  }
+};
+
+
+struct expr_t {
+  static int counter;
+  int tmp;
+  expr_t() : tmp(counter) { ++counter; }
+};
+
+int expr_t::counter = 0;
+
+struct var_decl_t : public decl_t {
+  sptr<type_t> type;
+  opt<sptr<expr_t>> val;
+
+  var_decl_t(std::string_view name, std::shared_ptr<type_t> type,
+             std::optional<std::shared_ptr<expr_t>> value)
+      : decl_t(name), type(type), val(value) {}
+};
+
+// @TODO: remove the var stuff and just have a reference to a type
+struct type_decl_t : public decl_t {
+  using tvar = var<sptr<type_t>, sptr<type_decl_t>>;
+  tvar type;
+  type_decl_t(std::string_view name, std::shared_ptr<type_t> type)
+      : decl_t(name), type(type) {}
+
+  auto extract_concrete_type() -> sptr<type_t> {
+    return std::visit(
+        overloaded{[&](const sptr<type_t> &val) -> sptr<type_t> { return val; },
+                   [&](const sptr<type_decl_t> &val) -> sptr<type_t> {
+                     return val->extract_concrete_type();
+                   }},
+        type);
+  }
+  bool operator==(const sptr<type_t> &ptr) const {
+    return std::visit(
+        overloaded{
+            [&](const sptr<type_t> &val) -> bool { return val == ptr; },
+            [&](const sptr<type_decl_t> &val) -> bool { return *val == ptr; }},
+        type);
+  }
+};
+
+struct scope_decl_t : public decl_t, public environment_t {
+  scope_decl_t(const std::basic_string_view<char> &name,
+               std::shared_ptr<semantics::locale_t> locale)
+      : decl_t(name), environment_t(locale) {}
+
+};
+}; // namespace semantics
+
+namespace semantics {
+struct locale_state_t {
+  sptr<semantics::locale_t> global_scope;
+  sptr<semantics::locale_t> local_scope;
+
+  static auto make() -> locale_state_t {
+    auto root = std::make_shared<semantics::locale_t>();
+    return {root, root};
+  }
+
+  template <bool local_search = false>
+  auto lookup(std::string_view name) -> auto {
+    return local_scope->lookup<local_search>(name);
+  }
+
+  auto insert(const std::string_view name,
+              const semantics::locale_t::var val) -> auto {
+    return local_scope->insert(name, val);
+  }
+
+  //makes a locale with that locale as it's parent
+  auto make_locale() -> sptr<semantics::locale_t> {
+    return std::make_shared<locale_t>(local_scope);
+  }
+
+  auto dive(sptr<semantics::locale_t> &locale) { local_scope = locale; }
+
+  auto emerge() { local_scope = local_scope->parent; }
+
+  template <typename T>
+  auto dive(sptr<semantics::locale_t> &locale, std::function<T> fn) {
+    local_scope = locale;
+    auto t = fn();
+    this->emerge();
+    return t;
+  }
+};
+
+struct ctx_t {
+  parser::node_buffer_t &nodes;
+  token_buffer_t &toks;
+  locale_state_t &loc;
+};
+
+using cursor_t = podlist_t<parser::node_t>::iterator;
+
+void stmt_list(ctx_t &ctx, parser::node_buffer_t::span<> span);
+
+auto type_deduction(ctx_t &ctx, podlist_t<parser::node_t>::span<> ch) {
+  return [&] -> sptr<type_t> {
+    auto cursor = ch.begin();
+    return std::visit(
+        overloaded{[&](parser::node_t::final_t &val) -> sptr<type_t> {
+                     switch (val->type_) {
+                     case tokc::TYPE_FLOAT:
+                     case tokc::TYPE_INT:
+                     case tokc::TYPE_UINT:
+                       return std::make_shared<integral_t>(ctx.toks.str(val));
+                     default:
+                       std::unreachable();
+                     }
+                   },
+                   [&](parser::node_t::median_t &val) -> sptr<type_t> {
+                     auto handle_error = [](const std::string &message) {
+                       std::cerr << message << std::endl;
+                       std::exit(EXIT_FAILURE); // Use EXIT_FAILURE for clarity
+                     };
+                     auto ch = cursor->as_median().children();
+                     switch (val.type_) {
+                     case medianc::CHAIN:
+                       return [&] -> sptr<type_t> {
+                         // I should find a way to do this without raw pointers
+                         auto locale = ctx.loc.local_scope.get();
+                         sptr<decl_t> val = nullptr;
+                         for (size_t i = 0; i < ch.size(); i++) {
+                           auto &elm = *(ch.begin() + i);
+                           if (!elm.is_final())
+                             throw std::runtime_error("Non valid chain");
+                           auto fin = elm.as_final();
+                           if (fin->type_ != tokc::ID)
+                             throw std::runtime_error(
+                                 "Expected ID in type chain");
+
+                           std::string_view link = ctx.toks.str(fin);
+                           auto res = locale->lookup(link);
+                           if (!res.has_value())
+                             handle_error("Undefined reference: " +
+                                          std::string(link));
+                           locale = res->first;
+                           val = res->second;
+                           if (i == ch.size() - 1) {
+                             if (auto vptr =
+                                     std::dynamic_pointer_cast<type_decl_t>(
+                                         val)) {
+                               // std::cout << "Found a type alias: " <<
+                               // vptr->name<< std::endl;
+                               auto real_type = vptr->extract_concrete_type();
+                               return real_type;
+                             } else {
+                               handle_error("Symbol is not a type: " +
+                                            std::string(link));
+                             }
+                           } else if (auto vptr = std::dynamic_pointer_cast<
+                                          scope_decl_t>(val)) {
+                             // std::cout << "Found a scope" << std::endl;
+                             auto new_locale = vptr->symbols.get();
+                             if (new_locale) {
+                               if (new_locale->table.size() == 0) {
+                                 handle_error("Empty scope");
+                               }
+                             } else {
+                               handle_error("Null scope table");
+                             }
+                             locale = vptr->symbols.get();
+                             continue;
+                           } else {
+                             handle_error("Symbol is not a type: " +
+                                          std::string(link));
+                           }
+                         }
+
+                         std::unreachable();
+                       }();
+                       break;
+                     case medianc::RECORD:
+                       return [&] -> sptr<type_t> {
+                         cursor.advance();
+                         auto rec = rec_t(ctx.loc.make_locale());
+                         auto val = std::make_shared<rec_t>(rec);
+                         
+                         auto med = cursor->as_median();
+                         auto span = med.children();
+                         ctx.loc.dive(val->symbols, std::function([&] {
+                                        stmt_list(ctx, span);
+                                        return 0;
+                                      }));
+                         return val;
+                       }();
+                       break;
+                     case medianc::FN_SIG:
+                       return [&] -> sptr<type_t> {
+                         auto med = cursor->as_median();
+                         auto ch = med.children();
+                         if (ch.size() == 0)
+                           return std::make_shared<fnsig_t>(std::nullopt,
+                                                            std::nullopt);
+
+                         auto new_locale = ctx.loc.make_locale();
+                       }();
+                       break;
+                     default:
+                       std::cerr << "Unsupported type" << std::endl;
+                       std::abort();
+                     }
+                     // return std::make_shared<type_testing_t>();
+                   },
+                   [&](parser::node_t::err_t &val) -> sptr<type_t> {
+                     std::unreachable();
+                   }},
+        cursor->node);
+  }();
+}
+
+auto var_decl(ctx_t &ctx, podlist_t<parser::node_t>::span<> ch) {
+  auto cursor = ch.begin();
+  auto end = ch.end();
+  auto name = ctx.toks.str(cursor->as_final());
+
+  cursor.advance();
+  auto type = [&] -> std::pair<opt<sptr<type_t>>, size_t> {
+    if (ch.end() <= cursor)
+      return {std::nullopt, 0};
+    auto node = cursor;
+    if (!node->is_median())
+      return {std::nullopt, 0};
+
+    auto med = node->as_median();
+    if (med->type_ != medianc::TYPE)
+      return {std::nullopt, 0};
+    auto ch = med.children();
+    return std::pair{
+        type_deduction(ctx, ch),
+        ch.size()};
+  }();
+  cursor += type.second;
+
+  auto val = opt<sptr<expr_t>>(std::nullopt);
+
+  auto result = ctx.loc.insert(
+      name, std::make_shared<var_decl_t>(name, type.first.value(), val));
+
+  if (!result.second) {
+    std::cerr << "Failed to insert var" << std::endl;
+    std::abort();
+  }
+}
+
+auto type_decl(ctx_t &ctx, podlist_t<parser::node_t>::span<> ch) {
+  auto cursor = ch.begin();
+  const auto name = ctx.toks.str(cursor->as_final());
+
+  cursor.advance();
+
+  // a type ref can only be only alias directly
+  //  I think it is better this way
+  auto type = [&] -> sptr<type_t> {
+    auto med = cursor->as_median();
+    auto ch = med.children();
+    return type_deduction(ctx, ch);
+  }();
+
+  auto result = ctx.loc.insert(
+      name, std::make_shared<type_decl_t>(name, type));
+  if (!result.second) {
+    std::cerr << "Failed to insert type decl" << std::endl;
+    std::abort();
+  }
+}
+
+auto stmt(ctx_t &ctx, cursor_t cursor) -> void;
+
+void stmt_list(ctx_t &ctx, parser::node_buffer_t::span<> span) {
+  auto cursor = span.begin();
+  auto end = span.end();
+
+  do {
+    auto med = cursor->as_median();
+    stmt(ctx, cursor);
+    cursor += med.children().size() + 1;
+  } while (cursor < end);
+}
+
+auto scope_decl(ctx_t &ctx, parser::node_buffer_t::span<> ch) {
+  auto cursor = ch.begin();
+  const auto name = ctx.toks.str(cursor->as_final());
+  
+  auto lookup = ctx.loc.lookup<true>(name);
+
+  bool is_extension = false;
+  sptr<locale_t> new_locale;
+  if (lookup.has_value()) {
+    auto decl = lookup->second;
+    if (auto vptr = std::dynamic_pointer_cast<scope_decl_t>(decl)) {
+      new_locale = vptr->symbols;
+      is_extension = true;
+    } else {
+      std::cerr << "Symbol already exists: " << name << '\n';
+      std::abort();
+    }
+  }
+  if (!is_extension) {
+    new_locale = ctx.loc.make_locale();
+    auto res =
+        ctx.loc.insert(name, std::make_shared<scope_decl_t>(name, new_locale));
+    if (!res.second) {
+      std::cerr << "Failed to insert scope" << std::endl;
+      std::abort();
+    }
+  }
+
+  //Scope can be empty
+  if(ch.size() != 2){
+    ctx.loc.dive(new_locale, std::function{[&] {
+                   cursor.advance(2);
+                   stmt_list(ctx, {cursor, ch.end()});
+                   return 0;
+                 }});
+  }
+
+
+  // throw std::runtime_error(std::string(__func__ )+ " Not Yet Homie");
+}
+
+auto stmt(ctx_t &ctx, cursor_t cursor) -> void {
+  cursor.advance();
+  auto med = cursor->as_median();
+
+  switch (med->type_) {
+  case medianc::DECL:
+    var_decl(ctx, med.children());
+    break;
+  case medianc::SCOPE_DECL:
+    scope_decl(ctx, med.children());
+    break;
+  case medianc::TYPE_DECL:
+    type_decl(ctx, med.children());
+    break;
+  default:
+    std::unreachable();
+  }
+}
+
+void visit(const sptr<locale_t> &loc, const size_t depth = 0) {
+  for (auto &elm : loc->table) {
+    auto ptr = elm.second;
+    std::cout << std::string(depth * 3, ' ') << elm.first;
+    if (auto vptr = std::dynamic_pointer_cast<scope_decl_t>(ptr)) {
+      std::cout << " scope" << "\n";
+      visit(vptr->symbols, depth + 1);
+    } else if (auto vptr = std::dynamic_pointer_cast<var_decl_t>(ptr)) {
+      std::cout << " var decl" << "\n";
+    } else if (auto vptr = std::dynamic_pointer_cast<type_decl_t>(ptr)) {
+      std::cout << " type decl" << "\n";
+    }
+  }
+}
+auto entry(podlist_t<parser::node_t> &nodes, token_buffer_t &toks) -> locale_t {
+  auto loc = locale_state_t::make();
+  auto ctx = ctx_t{nodes, toks, loc};
+  auto span = nodes.begin()->as_median().children();
+
+  stmt_list(ctx, span);
+
+  visit(loc.local_scope);
+  return std::move(loc.global_scope);
+}
+
+} // namespace semantics

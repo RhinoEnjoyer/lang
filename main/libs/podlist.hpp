@@ -6,6 +6,7 @@
 #include <cstring>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <type_traits>
 #include <utility>
 
@@ -29,6 +30,10 @@ struct podlist_t {
   constexpr static podlist_t create(const len_t cap) {
     return podlist_t((T*)std::malloc(cap * sizeof(T)), 0, cap);
     // std::cout << __PRETTY_FUNCTION__ << " " << cap << std::endl;
+  }
+
+  auto empty() const -> bool {
+    return len_ == 0;
   }
 
   template <const len_t cap = 0>
@@ -131,7 +136,7 @@ struct podlist_t {
   auto& front() { return *(begin()); }
 #define PODLIST_GROWTH_FACTOR ((cap_ > 50000) ? 2 : 30.0)
   // #define PODLIST_GROWTH_FACTOR 1.1
-  void push_back(T& val) {
+  void push_back(const T& val) {
     if (__builtin_expect((bool)(len_ == cap_), false))
       resize(cap_ * PODLIST_GROWTH_FACTOR + 1);
     memcpy(begin_ + len_, &val, sizeof(T));
@@ -168,14 +173,32 @@ struct podlist_t {
     memcpy(begin_ + len_, a.begin(), sizeof(T) * arg_len);
     len_ += a.size();
   }
+  void append(std::span<T> span) {
+    auto arg_len = span.size();
 
-  // template <typename... Args> void emplace_back(Args &&...args) {
-  //   if (__builtin_expect((bool)(len_ == cap_), false))
-  //     resize(cap_ * PODLIST_GROWTH_FACTOR);
-  //   // memcpy(begin_ + len_, &val, sizeof(T));
-  //   begin_[len_] = T{args...};
-  //   ++len_;
-  // }
+    if (__builtin_expect((bool)(len_ + arg_len >= cap_), false))
+      resize(cap_ * PODLIST_GROWTH_FACTOR + arg_len);
+
+    memcpy(begin_ + len_, span.begin(), sizeof(T) * arg_len);
+    len_ += span.size();
+  }
+
+  void insert(std::uint64_t index, std::span<T> span){
+    if(index >= cap_)
+      append(span);
+
+    const auto leni = span.size();
+    const auto lenv = len_;
+    const auto newcap = lenv + leni;
+    const auto movelen = cap_ - index;
+    if(newcap > cap_)
+      this->resize(lenv + leni + lenv*1.2);
+    // const auto endi = cap_ - 1;
+    const auto oldmovei = cap_ - movelen;
+
+    std::memmove(begin_ + index, begin_ + oldmovei, sizeof(T) * (movelen));
+    std::memcpy(begin_ + index, span.data(), sizeof(T)*leni);
+  }
 
   void regress(const len_t rlen) {
     if (len_ < rlen)
@@ -184,9 +207,14 @@ struct podlist_t {
   }
   void pop_back() { regress(1); }
 
-  template <bool is_const>
+  template <typename O, bool is_const>
   struct podlist_iterator_t {
-    using iterator_category = std::bidirectional_iterator_tag;
+    // using iterator_category = std::contiguous_iterator_tag;
+    // using difference_type = std::ptrdiff_t;
+    // using value_type = T;
+    // using pointer = typename std::conditional<is_const, const T*, T*>::type;
+    // using reference = typename std::conditional<is_const, const T&, T&>::type;
+    using iterator_category = std::contiguous_iterator_tag;
     using difference_type = std::ptrdiff_t;
     using value_type = T;
     using pointer = typename std::conditional<is_const, const T*, T*>::type;
@@ -194,53 +222,131 @@ struct podlist_t {
 
     explicit podlist_iterator_t(pointer ptr) : ptr_(ptr) {}
 
+    template <bool other_is_const>
+    podlist_iterator_t(const podlist_iterator_t<O, other_is_const>& other)
+        : ptr_(other.ptr_) {}
+    // template <bool ic0, bool ic1>
+    // podlist_iterator_t<ic0>(podlist_iterator_t<ic1> ptr)
+    //     : ptr_(ptr.ptr_) {}
+    // explicit podlist_iterator_t<true>(podlist_iterator_t<false> ptr) :
+    // ptr_(ptr) {}
+
     reference operator*() const { return *ptr_; }
     pointer operator->() const { return ptr_; }
-
-    // Pre-increment
-    podlist_iterator_t& operator++() {
-      ptr_++;
+    podlist_iterator_t &operator++() {
+      ++ptr_;
       return *this;
     }
-
-    // Post-increment
     podlist_iterator_t operator++(int) {
       podlist_iterator_t tmp = *this;
       ++(*this);
       return tmp;
     }
 
-    // Pre-decrement
-    podlist_iterator_t& operator--() {
-      ptr_--;
+    podlist_iterator_t &operator--() {
+      --ptr_;
       return *this;
     }
-
-    // Post-decrement
     podlist_iterator_t operator--(int) {
       podlist_iterator_t tmp = *this;
       --(*this);
       return tmp;
     }
 
-    // Adding/subtracting an offset
-    podlist_iterator_t operator+(int offset) const {
-      return podlist_iterator_t(ptr_ + offset);
+    podlist_iterator_t operator+(difference_type n) const {
+      return podlist_iterator_t(ptr_ + n);
     }
-    podlist_iterator_t operator-(int offset) const {
-      return podlist_iterator_t(ptr_ - offset);
+    podlist_iterator_t operator-(difference_type n) const {
+      return podlist_iterator_t(ptr_ - n);
     }
 
-    // Equality/Inequality comparison
-    friend bool operator==(const podlist_iterator_t& a,
-                           const podlist_iterator_t& b) {
+    difference_type operator-(const podlist_iterator_t &other) const {
+      return ptr_ - other.ptr_;
+    }
+
+    podlist_iterator_t &operator+=(difference_type n) {
+      ptr_ += n;
+      return *this;
+    }
+    podlist_iterator_t &operator-=(difference_type n) {
+      ptr_ -= n;
+      return *this;
+    }
+
+    // Comparison operators
+    friend bool operator==(const podlist_iterator_t &a,
+                           const podlist_iterator_t &b) {
       return a.ptr_ == b.ptr_;
     }
 
-    friend bool operator!=(const podlist_iterator_t& a,
-                           const podlist_iterator_t& b) {
+    friend bool operator!=(const podlist_iterator_t &a,
+                           const podlist_iterator_t &b) {
       return a.ptr_ != b.ptr_;
     }
+
+    friend bool operator<(const podlist_iterator_t &a,
+                          const podlist_iterator_t &b) {
+      return a.ptr_ < b.ptr_;
+    }
+
+    friend bool operator<=(const podlist_iterator_t &a,
+                           const podlist_iterator_t &b) {
+      return a.ptr_ <= b.ptr_;
+    }
+
+    friend bool operator>(const podlist_iterator_t &a,
+                          const podlist_iterator_t &b) {
+      return a.ptr_ > b.ptr_;
+    }
+
+    friend bool operator>=(const podlist_iterator_t &a,
+                           const podlist_iterator_t &b) {
+      return a.ptr_ >= b.ptr_;
+    }
+    // // Pre-increment
+    // podlist_iterator_t& operator++() {
+    //   ptr_++;
+    //   return *this;
+    // }
+
+    // // Post-increment
+    // podlist_iterator_t operator++(int) {
+    //   podlist_iterator_t tmp = *this;
+    //   ++(*this);
+    //   return tmp;
+    // }
+
+    // // Pre-decrement
+    // podlist_iterator_t& operator--() {
+    //   ptr_--;
+    //   return *this;
+    // }
+
+    // // Post-decrement
+    // podlist_iterator_t operator--(int) {
+    //   podlist_iterator_t tmp = *this;
+    //   --(*this);
+    //   return tmp;
+    // }
+
+    // // Adding/subtracting an offset
+    // podlist_iterator_t operator+(int offset) const {
+    //   return podlist_iterator_t(ptr_ + offset);
+    // }
+    // podlist_iterator_t operator-(int offset) const {
+    //   return podlist_iterator_t(ptr_ - offset);
+    // }
+
+    // // Equality/Inequality comparison
+    // friend bool operator==(const podlist_iterator_t& a,
+    //                        const podlist_iterator_t& b) {
+    //   return a.ptr_ == b.ptr_;
+    // }
+
+    // friend bool operator!=(const podlist_iterator_t& a,
+    //                        const podlist_iterator_t& b) {
+    //   return a.ptr_ != b.ptr_;
+    // }
 
     pointer base() const { return ptr_; }
 
@@ -248,14 +354,53 @@ struct podlist_t {
       ptr_ += off;
       return *this;
     }
-    
-   private:
-    pointer ptr_;
+    private : pointer ptr_;
   };
 
-  // Define types for both const and non-const iterators
-  using iterator = podlist_iterator_t<false>;
-  using const_iterator = podlist_iterator_t<true>;
+  template <bool is_const = false> struct span {
+    using iterator = podlist_iterator_t<T, is_const>;
+
+    iterator begin_;
+    iterator end_;
+
+    span(iterator begin, iterator end) : begin_(begin), end_(end) {}
+    span(iterator begin, size_t len) : begin_(begin), end_(begin + len) {}
+
+    span(T *bptr, T *eptr) : begin_(bptr), end_(eptr) {}
+    span(T *bptr, size_t len) : begin_(bptr), end_(bptr + len) {}
+
+    iterator begin() const { return begin_; }
+    iterator end() const { return end_; }
+
+    auto operator[](size_t index) -> T & { return *(begin_ + index); }
+    auto operator[](size_t index) const -> const T & {
+      return *(begin_ + index);
+    }
+
+    span slice(std::size_t start, std::size_t count) const {
+      if (start + count > size())
+        throw std::out_of_range("Span slice out of range");
+      return span(begin_ + start, count);
+    }
+
+    bool empty() const { return begin_ == end_; }
+
+    bool operator==(const span &other) const {
+      return size() == other.size() && std::equal(begin_, end_, other.begin_);
+    }
+
+    bool operator!=(const span &other) const { return !(*this == other); }
+
+    bool operator<(const span &other) const {
+      return std::lexicographical_compare(begin_, end_, other.begin_,
+                                          other.end_);
+    }
+    std::ptrdiff_t size() const { return end_ - begin_; }
+  };
+
+    // Define types for both const and non-const iterators
+    using iterator = podlist_iterator_t<T,false>;
+  using const_iterator = podlist_iterator_t<T,true>;
 
   using it = iterator;
   using c_it = const_iterator;
@@ -270,8 +415,15 @@ struct podlist_t {
   const_iterator cbegin() const { return const_iterator(begin_); }
   const_iterator cend() const { return const_iterator(begin_ + len_); }
 
+
   template <bool cit>
-  auto it2index(podlist_iterator_t<cit> it) const -> std::uint64_t {
+  auto it2index(podlist_iterator_t<T,cit> it) const -> std::uint64_t {
     return it.base() - begin_;
+  }
+  template <bool is_const, typename... Args>
+  void insert(podlist_iterator_t<T, is_const> it, Args&... args) {
+    constexpr auto arg_len = sizeof...(Args);
+    auto index = it2index(it);
+    insert(index,args...);
   }
 };

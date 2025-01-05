@@ -1,6 +1,7 @@
 #include "../become.hpp"
 #include "./lexer.hpp"
 #include <array>
+#include <llvm/Support/raw_ostream.h>
 
 
 //make the lexer create separate tables for 
@@ -119,6 +120,7 @@ constexpr auto whitespace_table = [] consteval {
 [[clang::always_inline]] inline auto
 scan_for_word(llvm::StringRef src, pos_t pos) -> llvm::StringRef {
   const std::size_t size = src.size();
+
   while (pos < static_cast<pos_t>(size) &&
          id_byte_lut[static_cast<unsigned char>(src[pos])])
     ++pos;
@@ -235,7 +237,37 @@ auto id(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   if (LLVM_UNLIKELY(text.size() == 0))
     return err("ID needs to have charactes in it", DISPATCH_ARGS);
 
-  lexer.push(tokc::e::ID, bpos, pos);
+  constexpr tokc::e type = tokc::ID;
+  lexer.push(type, bpos, pos);
+  become next(DISPATCH_ARGS);
+}
+auto integral_id(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+  const auto text = lex::word(src, pos);
+
+  if (LLVM_UNLIKELY(text.size() == 0))
+    return err("ID needs to have charactes in it", DISPATCH_ARGS);
+
+  tokc::e type = tokc::ID;
+  //floats have a specific size so they do not really need to be here but it is still ok
+  if (text.size() != 1 &&
+      std::all_of(text.begin() + 1, text.end(),
+                  [](unsigned char c) { return std::isdigit(c); })) {
+    switch (text[0]) {
+    case 's':
+      type = tokc::TYPE_INT;
+      break;
+    case 'u':
+      type = tokc::TYPE_UINT;
+      break;
+    case 'f':
+      type = tokc::TYPE_FLOAT;
+      break;
+    }
+  } else if (text == "bool") [[unlikely]] {
+    type = tokc::TYPE_BOOLEAN;
+  }
+
+  lexer.push(type, bpos, pos);
   become next(DISPATCH_ARGS);
 }
 
@@ -485,6 +517,7 @@ auto strlit(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   become next(DISPATCH_ARGS);
 }
 
+
 constexpr auto dispatch_table = [] consteval {
   dispatch_table_t table = {};
   for (int i = 0; i < 256; ++i) {
@@ -522,6 +555,11 @@ constexpr auto dispatch_table = [] consteval {
   asign2table(table, '[', symetrical::brace_open);
   asign2table(table, ']', symetrical::brace_close);
 
+  asign2table(table, 's', integral_id);
+  asign2table(table, 'u', integral_id);
+  asign2table(table, 'f', integral_id);
+  asign2table(table, 'b', integral_id);
+
   return table;
 }();
 
@@ -537,8 +575,9 @@ next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 
 auto entry(const src_buffer_t *src) -> token_buffer_t  {
   lexer_t lexer;
-  lexer.buffer_.toks = vec<token_t>::create(64);
-  lexer.buffer_.locs = vec<srcloc_t>::create(64 * 4);
+  lexer.buffer_.toks = podlist_t<token_t>::create(64);
+  lexer.buffer_.locs = podlist_t<srcloc_t>::create(64 * 4);
+  lexer.openstack_ = podlist_t<tokc::e>::create(64);
   lexer.buffer_.src = src;
 
   lexer.push(tokc::e::BEGINSYMETRICAL, 0, 0);
@@ -558,6 +597,7 @@ auto entry(const src_buffer_t *src) -> token_buffer_t  {
   lexer.buffer_.toks.shrink_to_fit();
   lexer.buffer_.locs.shrink_to_fit();
 
+  lexer.openstack_.release();
   return std::move(lexer.buffer_);
   // return 0;
 }

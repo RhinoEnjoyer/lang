@@ -12,7 +12,7 @@ namespace lexer {
 using pos_t = ssize_t;
 struct lexer_t {
   token_buffer_t buffer_;
-  llvm::SmallVector<tokc::e, 32> openstack_;
+  podlist_t<tokc::e> openstack_;
   std::int32_t line_ = 0;
   std::int32_t line_begin_ = 0;
 

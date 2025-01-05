@@ -23,20 +23,13 @@ using depth_t = std::int32_t;
 
 struct token_t {
   tokc::e type_;
-  // depth_t depth_;
+
+  template <typename... Types>
+  [[nodiscard]] auto isa(Types... types) const -> bool {
+    return ((type_ == types) || ...);
+  }
 };
 
-using token_buffer_index_t = std::size_t;
-// struct token_buffer_index_t {
-//   std::size_t index;
-
-//   token_buffer_index_t(vec<token_t>& list, vec<token_t>::c_it it): index
-//   (it.base() - list.begin().base()){}
-
-//   operator std::size_t(){
-//     return index;
-//   }
-// };
 // srcloc_t = 16 bytes each
 // token_t  = 4 bytes each
 
