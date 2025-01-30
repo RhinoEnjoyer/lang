@@ -2,8 +2,9 @@
 
 #include <cstdint>
 namespace tokc {
-
-enum e : std::int32_t {
+using e_type = std::int32_t;
+enum e : e_type {
+  first,
 #define TOKEN_VIRTUAL(code) code,
 #define TOKEN_SYMBOL_SEQUENCE(spelling, code) code,
 #define TOKEN_ONE_CHAR(spelling, code) code,
@@ -16,11 +17,10 @@ enum e : std::int32_t {
 #define TOKEN_PARALLEL_SEQUENCE(spelling, code, sgroup_code) code, sgroup_code,
 #define TOKEN_BUILTIN_KEYWORD(spelling, code) code,
 #include "./token.def"
-
-  LENGTH,
+  last,
 };
 
-inline constexpr auto length() -> std::int64_t { return e::LENGTH; }
+inline constexpr auto length() -> std::int64_t { return e::last; }
 inline constexpr auto is_symetrical(const tokc::e tok) -> bool {
   switch (tok) {
 #define TOKEN_SYMETRICAL_OPEN_SEQUENCE(spelling, code, closing_code,           \

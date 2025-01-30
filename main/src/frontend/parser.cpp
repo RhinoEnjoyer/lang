@@ -1,5 +1,7 @@
 #include "./parser.hpp"
 #include "../become.hpp"
+#include "../overloaded.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
@@ -7,7 +9,6 @@
 #include <tuple>
 #include <utility>
 #include <variant>
-#include "../overloaded.hpp"
 
 //we need better error handling 
 
@@ -42,29 +43,19 @@
 /* Consolidate functions for the @self and @pipe? maybe make it a unique start
  *   and but make it like a chain? */
 
-
-
-#include <unordered_map>
-#include <optional>
  
 namespace parser {
 
-template<typename T>
-using opt = std::optional<T>;
-
-template<typename Key, typename Val>
-using map = std::unordered_map<Key, Val>;
-
-struct ctx_t {
+struct context_t {
   const token_buffer_t &toks;
-  podlist_t<node_t>& nodes;
+  podlist_t<node_t> &nodes;
 };
 
 // #define DISPATCH_ARGS_DECL                                                     \
 //   const token_buffer_t &toks, podlist_t<node_t> &buffer, cursor_t &cursor
 // #define DISPATCH_ARGS toks, buffer, cursor
 
-#define DISPATCH_ARGS_DECL ctx_t &ctx, cursor_t &cursor
+#define DISPATCH_ARGS_DECL context_t &ctx, cursor_t &cursor
 #define DISPATCH_ARGS ctx, cursor
 
 #define DISPATCH_FNSIG (DISPATCH_ARGS_DECL)->void
@@ -533,11 +524,10 @@ auto aggregate_decl_pat DISPATCH_FNSIG{
 }
 
 auto collection_fn DISPATCH_FNSIG {become  aggregate_decl_pat<attribute_path<medianc::ELEMENT,collection_alias_decl>, medianc::COLLECTION>(DISPATCH_ARGS);}
-auto record_fn     DISPATCH_FNSIG {become aggregate_decl_pat<base, medianc::RECORD>(DISPATCH_ARGS);}
+auto record_fn     DISPATCH_FNSIG {become  aggregate_decl_pat<base, medianc::RECORD>(DISPATCH_ARGS);}
 auto union_fn      DISPATCH_FNSIG {become  aggregate_decl_pat<base, medianc::UNION>(DISPATCH_ARGS);}
-auto enum_fn       DISPATCH_FNSIG {become aggregate_decl_pat<dive<medianc::ELEMENT,enum_elm>, medianc::ENUM>(DISPATCH_ARGS);}
-
-
+auto enum_fn       DISPATCH_FNSIG {become  aggregate_decl_pat<dive<medianc::ELEMENT,enum_elm>, medianc::ENUM>(DISPATCH_ARGS);}
+auto tup_fn        DISPATCH_FNSIG {return  sequence<consume<tokc::e::BUILTIN_DUCKLING>,parens<dive<medianc::ELEMENT,type>, medianc::TUPLE>>(DISPATCH_ARGS);}
 
 constexpr auto aggregate_table = table_t_make(
     pair_t{tokc::BUILTIN_COLLECTION,collection_fn},
@@ -569,9 +559,11 @@ static constexpr auto type_prefix_table = table_t_make(
 
 
 constexpr auto type_table = table_t_make<
+  
     anon_type_table,
     integral_table,
     table_t_make(
+        pair_t{tokc::BUILTIN_DUCKLING, tup_fn},
         pair_t{tokc::BUILTIN_TYPEOF,
                     sequence<advance, parens<expr, medianc::TYPEOF>>},
         pair_t{tokc::BUILTIN_PTR, push_final<>}
@@ -940,7 +932,7 @@ auto base DISPATCH_FNSIG {
 
 auto entry(const token_buffer_t &toks, cursor_t cursor,const cursor_t end) -> parser_out {
   auto nodes = podlist_t<node_t>::create(64);
-  auto ctx = ctx_t{toks, nodes};
+  auto ctx = context_t{toks, nodes};
   symetrical<base, medianc::FILE>(ctx, cursor);
   return nodes;
 }
@@ -962,7 +954,7 @@ inline auto traverse_impl(const token_buffer_t &buf, auto &cursor,
                           },
                           [&](node_t::median_t &val) {
                             {
-                              print << "Median: " << medianc::to_str(val.type_)
+                              print << "Median: " << medianc::str(val.type_)
                                     << " length: " << val.len_ << '\n';
                             }
                             cursor.advance();
@@ -974,7 +966,7 @@ inline auto traverse_impl(const token_buffer_t &buf, auto &cursor,
                               std::abort();
                             }
                           }},
-               cursor->node);
+               cursor->node_);
   }
 #undef space_str
 #undef print

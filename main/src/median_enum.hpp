@@ -2,14 +2,19 @@
 
 #include "token_enum.hpp"
 #include <cstdint>
+#include <string_view>
 namespace medianc {
-enum e : std::int32_t {
+  using e_type = tokc::e_type;
+enum e : e_type {
+  first = tokc::e::last,
 #define MEDIAN_CODE(code) code,
 #include "median.def"
   last
 };
 
-constexpr inline const char *to_str(e val) {
+consteval int64_t length() { return e::last; }
+
+constexpr inline const std::string_view str(e val) {
   switch (val) {
 #define MEDIAN_CODE(code)                                                      \
   case code:                                                                   \
@@ -19,7 +24,6 @@ constexpr inline const char *to_str(e val) {
     return "Unknown";
   }
 }
-
 
 constexpr inline e symetrical(tokc::e val) {
   switch(val){

@@ -1,4 +1,5 @@
 #include <llvm/Support/VirtualFileSystem.h>
+#include <print>
 #include <unistd.h>
 
 #include <cmath>
@@ -11,11 +12,12 @@
 // #include "./frontend/semantics.hpp"
 #include "./source_buffer.hpp"
 #include "mesure.hpp"
-#include "./frontend/semantics3.hpp"
+#include "./frontend/semantics4.hpp"
 #include "token.hpp"
 
 #include <fmt/format.h>
 #include <fmt/printf.h>
+
 
 
 
@@ -60,11 +62,10 @@ int main() {
     }();
     std::cout << '\t' << src.length() << " bytes" << "\n\n";
 
-
     auto [lex_output, lex_time] = mesure([&] { return lexer::entry(&src); });
 
-    // constexpr double togb = 1024 * 1024 * 1024;
-    static constexpr double togb = 1000 * 1000 * 1000;
+    constexpr double togb = 1024 * 1024 * 1024;
+    // static constexpr double togb = 1000 * 1000 * 1000;
     auto &buffer = lex_output;
     print_token_buffer(buffer);
 
@@ -100,21 +101,25 @@ int main() {
       return parser::entry(lex_output, lex_output.toks.cbegin(),
                            lex_output.toks.cend());
     });
-    auto &parser_tree = parser_output;
 
-    parser::traverse(lex_output, parser_tree);
+    parser::traverse(lex_output, parser_output);
     std::cout << "\n"
               << "Parser: " << parser_time << "\n"
-              << "\tLength: " << parser_tree.length() << "\n"
+              << "\tLength: " << parser_output.length() << "\n"
               << std::endl;
 
-    auto [table, semantics_time] =
-        mesure([&] { return semantics::entry(parser_output, lex_output); });
+    auto [table, semantics_time] = mesure([&] {
+      return semantics::symbols::entry(lex_output, parser_output);
+    });
+
 
     // semantics::visit(table);
-    std::cout << "Semantics: " << semantics_time << std::endl;
+    std::println();
+    std::println("Semantics symbols pass: {}", semantics_time);
+    for (auto &elm : table->table)
+      semantics::symbols::visit(elm.second);
 
-    parser_tree.release();
+    parser_output.release();
     lex_output.locs.release();
     lex_output.toks.release();
   };

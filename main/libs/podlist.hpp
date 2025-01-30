@@ -11,6 +11,7 @@
 #include <utility>
 
 
+//change the allocator to somthing with alignment??
 
 /* Move only container
  *  made for PODs
@@ -220,6 +221,7 @@ struct podlist_t {
     using pointer = typename std::conditional<is_const, const T*, T*>::type;
     using reference = typename std::conditional<is_const, const T&, T&>::type;
 
+    explicit podlist_iterator_t() : ptr_(nullptr) {}
     explicit podlist_iterator_t(pointer ptr) : ptr_(ptr) {}
 
     template <bool other_is_const>
@@ -415,6 +417,8 @@ struct podlist_t {
   const_iterator cbegin() const { return const_iterator(begin_); }
   const_iterator cend() const { return const_iterator(begin_ + len_); }
 
+  template<bool is_const = false>
+  auto view() const { return span<is_const>{begin(), end()}; }
 
   template <bool cit>
   auto it2index(podlist_iterator_t<T,cit> it) const -> std::uint64_t {

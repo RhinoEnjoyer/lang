@@ -23,6 +23,7 @@ using depth_t = std::int32_t;
 
 struct token_t {
   tokc::e type_;
+  auto type() const -> tokc::e { return type_; }
 
   template <typename... Types>
   [[nodiscard]] auto isa(Types... types) const -> bool {
