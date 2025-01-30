@@ -108,7 +108,7 @@ int main() {
               << "\tLength: " << parser_output.length() << "\n"
               << std::endl;
 
-    auto [table, semantics_time] = mesure([&] {
+    auto [locale, semantics_time] = mesure([&] {
       return semantics::symbols::entry(lex_output, parser_output);
     });
 
@@ -116,8 +116,8 @@ int main() {
     // semantics::visit(table);
     std::println();
     std::println("Semantics symbols pass: {}", semantics_time);
-    for (auto &elm : table->table)
-      semantics::symbols::visit(elm.second);
+    for (auto &elm : locale->internals.table)
+      semantics::symbols::visit_decl(elm.second);
 
     parser_output.release();
     lex_output.locs.release();

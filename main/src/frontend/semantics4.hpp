@@ -13,7 +13,6 @@
 #include "../table.hpp"
 
 namespace semantics {
-
 struct decl_t;
 struct type_t;
 struct expr_t;
@@ -21,7 +20,6 @@ struct expr_t;
 using node_t = parser::node_t::external_node;
 using span_t = parser::node_t::median_proxy_t<false>::span_t;
 using cursor_t = span_t::iterator;
-
 using median_t = parser::node_t::median_proxy_t<false>;
 using final_t = parser::node_t::final_t;
 using err_t = parser::node_t::err_t;
@@ -30,7 +28,7 @@ struct locale_t;
 
 namespace decl_s {
 struct type_decl_t {
-  var<std::monostate, median_t, sptr<type_t>> type;
+  sptr<type_t> type;
 };
 
 struct scope_decl_t {
@@ -38,8 +36,8 @@ struct scope_decl_t {
 };
 
 struct var_decl_t {
-  var<std::monostate, median_t, sptr<type_t>> type;
-  var<std::monostate, median_t, sptr<expr_t>> init_val;
+  sptr<type_t> type;
+  sptr<expr_t> init_val;
 };
 
 // this could be used but it would work better with inheritance for decl_index
@@ -66,13 +64,13 @@ namespace type_s {
 // based locale_t
 //  where I can one with a map and one with a vector
 struct record_t {
+  //  the order of a record matters so I should have it use a vector?
+  //  allow the locale to give a list of pointers based on the decl_index?
+  //  use std::set?
   sptr<locale_t> loc;
 };
 struct unresoved_t {
   median_t med;
-};
-struct strlit_t {
-  std::string_view str;
 };
 struct bitsize_t {
   size_t size;
@@ -83,6 +81,7 @@ struct bitsize_t {
   auto tobyte() -> size_t { return size / 8; }
 };
 struct float_t  :public bitsize_t {
+  //could make it bettr but it works and I do not think I will ever change it so it is fine
   float_t(const size_t len) : bitsize_t(len) {
     if (size != 16 && size != 32 && size != 64 && size != 80 && size != 128) {
       throw std::invalid_argument(
@@ -115,7 +114,7 @@ struct tup_t {
 };
 
 using var =
-    var<unresoved_t, record_t, tup_t, indirection_t, numeric_t, strlit_t>;
+    var<unresoved_t, record_t, tup_t, indirection_t, numeric_t>;
 }; // namespace type_s
 
 struct type_t : public type_s::var {};
@@ -123,6 +122,10 @@ struct type_t : public type_s::var {};
 struct locale_t {
   // this is basicaly our prespective
   // since we do lookups from the prespective of the symbol
+  using val_t = sptr<decl_t>;
+  using entry_t = val_t;
+  using insert_t = std::tuple<bool, std::string_view, val_t>;
+
   struct path_t {
     using val_t = sptr<locale_t>;
     list<val_t> path;
@@ -139,71 +142,62 @@ struct locale_t {
     size_t size() const { return path.size(); }
     void clear() { path.clear(); }
   };
-
-  using val_t = sptr<decl_t>;
-  using entry_t = val_t;
   using lookup_t = std::tuple<bool, path_t, entry_t>;
-  using insert_t = std::tuple<bool, std::string_view, val_t>;
+  sptr<locale_t> parent_;
 
-  sptr<locale_t> parent;
-  std::unordered_map<std::string_view, entry_t> table;
-
-  insert_t try_insert(std::string_view name, entry_t val) {
-    auto res = table.try_emplace(name, val);
-    return {res.second, name, res.first->second};
-  }
-
+  // general
   static sptr<locale_t> make_child(sptr<locale_t> self) {
     return std::make_shared<locale_t>(locale_t{self, {}});
   }
 
-  template <bool is_local_search>
-  static lookup_t lookup(sptr<locale_t> &self, path_t &path,
-                         const std::string_view name) {
-    path.push(self);
-    auto it = self->table.find(name);
+  sptr<locale_t> parent() { return parent_; }
+  
+  // implementation specific
+  struct internal {
+    std::unordered_map<std::string_view, entry_t> table;
+    static lookup_t ancestor_lookup(sptr<locale_t> self, path_t &path,
+                                    const std::string_view name) {
+      return lookup<false>(self, path, name);
+    }
+    static lookup_t local_lookup(sptr<locale_t> self, path_t &path,
+                                 const std::string_view name) {
+      return lookup<true>(self, path, name);
+    }
+    template <bool is_local_search>
+    static lookup_t lookup(sptr<locale_t> &self, path_t &path,
+                           const std::string_view name) {
+      path.push(self);
+      auto it = self->internals.table.find(name);
 
-    if (it != self->table.end())
-      return {true, path, it->second};
+      if (it != self->internals.table.end())
+        return {true, path, it->second};
 
-    if constexpr (!is_local_search)
-      if (self->parent)
-        return ancestor_lookup(self->parent, path, name);
+      if constexpr (!is_local_search)
+        if (self->parent_)
+          return ancestor_lookup(self->parent_, path, name);
 
-    return {false, path, {nullptr}};
+      return {false, path, {nullptr}};
+    }
+
+    insert_t try_insert(std::string_view name, entry_t val) {
+      auto res = table.try_emplace(name, val);
+      return {res.second, name, res.first->second};
+    }
+  } internals;
+
+  insert_t try_insert(std::string_view name, entry_t val) {
+    return internals.try_insert(name, val);
   }
-  static lookup_t ancestor_lookup(sptr<locale_t> self, path_t &path,
-                                  const std::string_view name) {
-    return locale_t::lookup<false>(self, path, name);
-  }
-  static lookup_t local_lookup(sptr<locale_t> self, path_t &path,
-                               const std::string_view name) {
-    return locale_t::lookup<true>(self, path, name);
-  }
-
   static lookup_t ancestor_lookup(sptr<locale_t> self,
                                   const std::string_view name) {
     path_t path;
-    return locale_t::lookup<false>(self, path, name);
+    return internal::lookup<false>(self, path, name);
   }
-  static lookup_t local_lookup(sptr<locale_t> self,
-                               const std::string_view name) {
+  static lookup_t local_lookup(sptr<locale_t> self,const std::string_view name) {
     path_t path;
-    return locale_t::lookup<true>(self, path, name);
+    return internal::lookup<true>(self, path, name);
   }
 };
-
-// struct external_context_t {
-//   token_buffer_t &toks;
-//   size_t decl_index = 0;
-//   size_t increment() { return decl_index++; }
-// };
-
-// struct icontext_t {
-//   external_context_t &ectx;
-//   size_t depth;
-//   sptr<locale_t> loc;
-// };
 
 struct context_t {
   // data
@@ -248,7 +242,7 @@ struct cursor_helper_t {
         }
       }
     } else {
-      static_assert(false, "fuck");
+      static_assert(false, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     }
     return std::nullopt;
   }
@@ -261,7 +255,6 @@ private:
 };
 
 namespace symbols{
-
 template <auto fn> void consume_list(context_t &ctx, median_t &med) {
   auto ch = med.children();
   auto cursor = ch.begin();
@@ -332,7 +325,8 @@ auto ref(context_t &ctx, median_t med) -> sptr<type_t> {
 }
 auto tup(context_t &ctx, median_t tup_node) -> sptr<type_t> {
   auto ch = tup_node.children();
-  auto types = list<sptr<type_t>>{ch.size2()};
+  auto types = list<sptr<type_t>>{};
+  types.reserve(ch.size2());
   for (auto& elm : ch) { // it has to do with auto&, it should have the &, before I had it as a value, I DO NOT KNOW 100% why I guess I use the pointer of that to get the next value
     { //the children are wrong, instead of getting the children of the element the only correcet thing is the parent for some reason
       auto elm_med = elm.as_median();
@@ -373,10 +367,8 @@ auto type_deduction(context_t &ctx, median_t type_med) -> sptr<type_t> {
         default:
           throw std::runtime_error(
               "type_deduction Invalid or unsupported type");
-          break;
         }
         std::unreachable();
-        return nullptr;
       },
       [&ctx](final_t &fin) -> sptr<type_t> {
         switch (fin->type()) {
@@ -429,17 +421,17 @@ auto var_decl(context_t &ctx, median_t med) -> void {
     throw std::runtime_error("symbol already exists " + std::string(name_str));
 
   // create the var_decl_t
-  auto type_val = [&] -> var<std::monostate, median_t, sptr<type_t>> {
+  auto type_val = [&] -> sptr<type_t> {
     if (!type_node)
-      return std::monostate{};                    // no type
+      return nullptr;                    // no type
     else if (type_node->type() == medianc::CHAIN) // this is for later
-      return type_node;
+      return std::make_shared<type_t>(type_s::unresoved_t{type_node.value()});
 
     return type_deduction(ctx, type_node.value()); // resolve the literal type
   }();
 
   auto ptr =
-      std::make_shared<decl_t>(decl_s::var_decl_t{type_val, std::monostate{}},
+      std::make_shared<decl_t>(decl_s::var_decl_t{type_val, nullptr},
                                name_str, ctx.increment());
   // insert symbol
   ctx.loc->try_insert(name_str, ptr);
@@ -582,25 +574,79 @@ auto entry(token_buffer_t &toks, parser::node_buffer_t &nodes) -> auto {
   return ctx.loc;
 }
 
-auto visit(sptr<decl_t> symbol, size_t depth = 0) -> void {
+auto visit_decl(sptr<decl_t> symbol, const size_t depth = 0) -> void;
+auto visit_type(sptr<type_t> type_symbol, const size_t depth) -> void {
+  const auto space = std::string(depth * 3, ' ');
+  std::print("{}Type: ", space);
+  if (type_symbol) {
+    ovisit(
+        *type_symbol,
+        [depth](type_s::tup_t &val) {
+          std::println("Tuple");
+          for (auto &elm : val.types)
+            visit_type(elm, depth + 1);
+        },
+        [depth](type_s::record_t &val) {
+          std::println("Record");
+          for (auto &elm : val.loc->internals.table)
+            visit_decl(elm.second, depth + 1);
+        },
+        [depth](type_s::indirection_t &val) {
+          std::print("Indirection ");
+          ovisit(
+              val, [](type_s::optr_t &val) {
+                std::println("Opaque ptr");
+              },
+              [depth](type_s::ptr_t &val) {
+                std::println("Ptr");
+                visit_type(val.type, depth + 1);
+              },
+              [depth](type_s::ref_t &val) {
+                std::println("Ref");
+                visit_type(val.type, depth + 1);
+              });
+        },
+        [](type_s::unresoved_t &val) {
+          std::println("Unresolved type, wait for resolution");
+        },
+        [](type_s::numeric_t &numval) {
+          std::print("Numeric: ");
+          ovisit(
+              numval,
+              [&](type_s::float_t &val) {
+                std::println("Float {} ", val.size);
+              },
+              [&](type_s::sint_t &val) { std::println("Sint {} ", val.size); },
+              [&](type_s::uint_t &val) { std::println("Uint {} ", val.size); },
+              [&](type_s::boolean_t &val) {
+                std::println("Boolean {} ", val.size);
+              });
+        },
+        [&](const auto &val) { std::println("Unknown type"); });
+  } else {
+    std::println("No type");
+  }
+}
+
+auto visit_decl(sptr<decl_t> symbol, const size_t depth) -> void {
   const auto space = std::string(depth * 3, ' ');
   std::print("{}", space);
   ovisit(
       *symbol,
       [&](const decl_s::var_decl_t &val) {
         std::println("Var decl: {}", symbol->name);
+        visit_type(val.type, depth + 1);
       },
       [&](const decl_s::type_decl_t &val) {
         std::println("Type decl: {}", symbol->name);
+        visit_type(val.type, depth + 1);
       },
       [&](const decl_s::scope_decl_t &val) {
         std::println("Scope decl: {}", symbol->name);
-        for (auto &elm : val.loc->table)
-          visit(elm.second, depth + 1);
+        for (auto &elm : val.loc->internals.table)
+          visit_decl(elm.second, depth + 1);
       },
-      [&](const auto &val) {
-        std::println("Symbol: {}",symbol->name);
-      });
+      [&](const auto &val) { std::println("Symbol: {}", symbol->name); });
 }
 } // namespace symbols
 

@@ -127,15 +127,15 @@ struct linear_locale_t : public locale_inh {
 } // namespace experimental
 
 struct locale_t {
-  sptr<locale_t> parent;
+  sptr<locale_t> parent_;
 
   using var = sptr<decl_t>;
   using lookup_t = opt<std::pair<locale_t *, var>>;
 
   std::map<std::string_view, var> table;
 
-  locale_t(sptr<locale_t> p) : parent(p) {}
-  locale_t() : parent(nullptr) {}
+  locale_t(sptr<locale_t> p) : parent_(p) {}
+  locale_t() : parent_(nullptr) {}
 
   auto insert(std::string_view name, locale_t::var val) -> auto {
     return this->table.try_emplace(name, val);
@@ -145,8 +145,8 @@ struct locale_t {
     auto &lhs = *this;
 
     // Check if parent pointers are equal or if parents themselves are equal
-    if (lhs.parent != rhs.parent) {
-      if (!lhs.parent || !rhs.parent || !(*lhs.parent == *rhs.parent))
+    if (lhs.parent_ != rhs.parent_) {
+      if (!lhs.parent_ || !rhs.parent_ || !(*lhs.parent_ == *rhs.parent_))
         return false;
     }
 
@@ -164,8 +164,8 @@ struct locale_t {
       return std::pair{this, it->second};
 
     if constexpr (!is_local_search) {
-      if (parent)
-        return parent->lookup<is_local_search>(name);
+      if (parent_)
+        return parent_->lookup<is_local_search>(name);
     }
     return std::nullopt;
   }
@@ -313,7 +313,7 @@ struct locale_state_t {
     return std::make_shared<locale_t>(local_scope);
   }
 
-  auto emerge() { local_scope = local_scope->parent; }
+  auto emerge() { local_scope = local_scope->parent_; }
 
   template <typename FNT, typename... T>
   auto dive(sptr<semantics::locale_t> &locale, FNT fn, T... args) {

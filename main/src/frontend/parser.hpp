@@ -177,13 +177,29 @@ struct node_t {
     template<typename T>
     struct has_node<T, std::void_t<decltype(std::declval<T>().node)>> : std::true_type {};
 
+
+    /////////////////////////////////////////
+    /////////////////////////////////////////
+    /////////////////////////////////////////
+    /////////////////////////////////////////
+    //IF THERE IS A PROBLEM THIS IS THE ONE//
+    /////////////////////////////////////////
+    /////////////////////////////////////////
+    /////////////////////////////////////////
+    /////////////////////////////////////////
     // Modify the median_proxy_t constructor
+    // I do not even remember why this is here
+    // it has only caused me pain
+    // it has fucked the type checking
+    // when using something like std::optional
+    // the else part should be good I guess 
     template <typename T>
     median_proxy_t(T &&val) : node{nullptr} {
         if constexpr (has_node<std::decay_t<T>>::value) {
             node = val.node;
+        }else{
+          static_assert(false, "No node :(");
         }
-        // Additional initialization if needed
     }
     // median_proxy_t (): node(nullptr){
       
