@@ -2,7 +2,7 @@
 
 #include <cstdint>
 namespace tokc {
-using e_type = std::int32_t;
+using e_type = std::int16_t;
 enum e : e_type {
   first,
 #define TOKEN_VIRTUAL(code) code,

@@ -1,6 +1,6 @@
 #pragma once
-#include "../overloaded.hpp"
 #include "../median_enum.hpp"
+#include "../overloaded.hpp"
 #include "../str_lit.hpp"
 #include "../token.hpp"
 #include "../token_str.hpp"
@@ -14,10 +14,9 @@
 #include <span>
 #include <type_traits>
 #include <utility>
-#include <array>
 #include <variant>
 
-namespace parser {
+namespace grammar {
 using cursor_t = podlist_t<token_t>::c_it;
 
 struct node_t {
@@ -26,7 +25,13 @@ struct node_t {
   struct median_t {
     using code_t = medianc::e;
     code_t type_;
-    std::int32_t len_;
+    std::int16_t len_;
+
+    // I am not sure if I should support this
+    //  good for debuging and error messages I guess
+    //  but it kinda ballons my size
+    final_t first;
+    final_t last;
 
     // somehow need a pointer or a reference to the next node or at least be
     // able to generate it
@@ -36,7 +41,7 @@ struct node_t {
   };
 
   struct err_t {
-    std::int32_t index_;
+    std::int16_t index_;
   };
 
   template <bool is_const = false> struct median_proxy_t {
@@ -137,9 +142,11 @@ struct node_t {
       }
       auto empty() const -> bool { return begin_ == end_; }
       auto size() const -> size_t { return end_ - begin_; }
-      auto within(iterator val) const { return (val >= begin() && val < end()); }
+      auto contain(iterator val) const {
+        return (val >= begin() && val < end());
+      }
       auto size2() -> size_t {
-        if(size_ != -1)
+        if (size_ != -1)
           return size_;
 
         size_ = 0;
@@ -151,14 +158,16 @@ struct node_t {
         return size_;
       }
       auto begin() const -> iterator { return iterator(begin_); }
-      auto end() const -> iterator { return iterator(end_+1); }
-      auto parent() const -> median_proxy_t<is_const> { return parent_->as_median(); }
+      auto end() const -> iterator { return iterator(end_ + 1); }
+      auto parent() const -> median_proxy_t<is_const> {
+        return parent_->as_median();
+      }
 
-      template<bool must_run = true, typename ...FNs>
-      auto run(FNs... fns) const -> void{
+      template <bool must_run = true, typename... FNs>
+      auto run(FNs... fns) const -> void {
         auto fn_arr = std::array{fns...};
         auto cursor = begin();
-        for(auto i = 0; i < fn_arr.size(); i++){
+        for (auto i = 0; i < fn_arr.size(); i++) {
           fn_arr[i](cursor);
           cursor.advance();
           if (cursor >= end()) {
@@ -171,64 +180,42 @@ struct node_t {
       }
     };
 
-    template<typename T, typename = void>
-    struct has_node : std::false_type {};
-
-    template<typename T>
-    struct has_node<T, std::void_t<decltype(std::declval<T>().node)>> : std::true_type {};
-
-
-    /////////////////////////////////////////
-    /////////////////////////////////////////
-    /////////////////////////////////////////
-    /////////////////////////////////////////
-    //IF THERE IS A PROBLEM THIS IS THE ONE//
-    /////////////////////////////////////////
-    /////////////////////////////////////////
-    /////////////////////////////////////////
-    /////////////////////////////////////////
-    // Modify the median_proxy_t constructor
-    // I do not even remember why this is here
-    // it has only caused me pain
-    // it has fucked the type checking
-    // when using something like std::optional
-    // the else part should be good I guess 
-    template <typename T>
-    median_proxy_t(T &&val) : node{nullptr} {
-        if constexpr (has_node<std::decay_t<T>>::value) {
-            node = val.node;
-        }else{
-          static_assert(false, "No node :(");
-        }
-    }
-    // median_proxy_t (): node(nullptr){
-      
-    // }
+    // median_proxy_t() : node(nullptr) {}
     median_proxy_t(node_t *val) : node(val) {}
     median_proxy_t(median_proxy_t<> val) : node(val.node) {}
     median_proxy_t(const node_t *val) : node(val) {}
 
     using node_type = std::conditional_t<is_const, const node_t, node_t>;
     node_type *node;
-    auto type() const -> median_t::code_t {return node->as_raw_median().type_;}
+
+    auto first() -> final_t { return node->as_raw_median().first; }
+    auto last() -> final_t { return node->as_raw_median().last; }
+    auto type() const -> median_t::code_t {
+      return node->as_raw_median().type_;
+    }
     auto len() const -> size_t { return children().size(); }
     auto children() const -> span_t {
-      node_type* p = node;
-      node_type* b = node + 1;
+      node_type *p = node;
+      node_type *b = node + 1;
 
       auto plus = node->as_raw_median().len_;
-      node_type* e = node + plus;
+      node_type *e = node + plus;
       return span_t{p, b, e};
     }
 
-    median_proxy_t(const auto &val) {
-      // Logic to initialize from `val`
-      node = val.node; // Assuming `val` has a `node` member
+    struct external_node;
+    auto fchild() const -> node_t& {
+      // node_type *p = node;
+      node_type *b = node + 1;
+
+      // auto plus = node->as_raw_median().len_;
+      // node_type *e = node + plus;
+      return *(node + 1);
     }
   };
 
   using var_t = std::variant<final_t, median_t, err_t>;
-  parser::node_t::var_t node_;
+  var_t node_;
 
   [[nodiscard]] auto as_median() -> median_proxy_t<false> { return {this}; }
   [[nodiscard]] auto as_median() const -> const median_proxy_t<true> {
@@ -242,7 +229,9 @@ struct node_t {
     return std::get<median_t>(node_);
   }
 
-  [[nodiscard]] auto as_final() -> final_t & { return std::get<final_t>(node_); }
+  [[nodiscard]] auto as_final() -> final_t & {
+    return std::get<final_t>(node_);
+  }
   [[nodiscard]] auto as_final() const -> const final_t & {
     return std::get<final_t>(node_);
   }
@@ -252,7 +241,8 @@ struct node_t {
     return std::get<err_t>(node_);
   }
 
-  using ext_node_var = std::variant<std::monostate,final_t, median_proxy_t<>, err_t>;
+  using ext_node_var =
+      std::variant<std::monostate, final_t, median_proxy_t<>, err_t>;
   struct external_node : public ext_node_var {
     using ext_node_var::variant;
     external_node() : ext_node_var(std::monostate{}) {}
@@ -260,10 +250,9 @@ struct node_t {
 
   auto node() -> external_node {
     return std::visit(
-        overloaded{[&](const median_t &val) -> external_node {
-                     return this->as_median();
-                   },
-                   [&](const auto &val) -> external_node { return val; }},
+        overloaded{
+            [&](median_t &val) -> external_node { return this->as_median(); },
+            [&](auto &val) -> external_node { return val; }},
         this->node_);
   }
 
@@ -302,18 +291,17 @@ struct node_t {
   [[nodiscard]] static auto make(cursor_t cursor) -> node_t {
     return node_t{final_t(cursor)};
   }
-  [[nodiscard]] static auto make(median_t::code_t type,
-                                 std::int32_t len) -> node_t {
-    return node_t{median_t{type, len}};
+  [[nodiscard]] static auto make(median_t::code_t type, std::int16_t len,
+                                 final_t first) -> node_t {
+    return node_t{median_t{type, len, first, first}};
   }
 };
 
 using node_buffer_t = podlist_t<node_t>;
 using parser_out = podlist_t<node_t>;
 
-
-auto entry(const token_buffer_t &toks, cursor_t cursor,
-           const cursor_t end) -> parser_out;
+auto entry(const token_buffer_t &toks, const std::map<size_t, size_t> &smap,
+           cursor_t cursor, const cursor_t end) -> parser_out;
 
 auto traverse(const token_buffer_t &buf, podlist_t<node_t> &buffer) -> void;
-} // namespace parser
+} // namespace grammar

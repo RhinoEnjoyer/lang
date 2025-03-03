@@ -53,9 +53,7 @@ struct token_buffer_t {
   // toks.at(index).depth_; }
   auto type(vec<token_t>::c_it it) const { return it->type_; }
   auto len(vec<token_t>::c_it it) const { return locs.at(to_index(it)).length_; }
-  auto row(vec<token_t>::c_it it) const {
-    return locs.at(to_index(it)).line_;
-  }
+  auto row(vec<token_t>::c_it it) const { return locs.at(to_index(it)).line_; }
   auto col(vec<token_t>::c_it it) const {
     const char *block = src->buffer().begin() + locs.at(to_index(it)).index_;
     while (block != src->buffer().begin() && *block != '\n')

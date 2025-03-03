@@ -1,7 +1,7 @@
 #include "../become.hpp"
 #include "./lexer.hpp"
 #include <array>
-#include <llvm/Support/raw_ostream.h>
+#include <print>
 
 
 //make the lexer create separate tables for 
@@ -205,6 +205,7 @@ auto next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN;
 
 [[clang::noinline]]
 auto err(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+  llvm::errs() << "Line: " << lexer.line_ << '\n';
   llvm::errs() << "Error: Unexpected char \' " << src[pos] << " \' at index " << pos
                << '\n';
   std::exit(EXIT_FAILURE);
@@ -397,7 +398,7 @@ namespace symetrical {
 auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   static constexpr auto fn = [](tokc::e r,
                                 DISPATCH_ARGS_DECL) constexpr -> void {
-    lexer.openstack_.push_back(symetrical_table[src[pos]]);
+    lexer.openstack_.push_back({symetrical_table[src[pos]], lexer.buffer_.toks.size()});
     // ++lexer.depth_;
   };
   become onechar<fn>(DISPATCH_ARGS);
@@ -405,7 +406,8 @@ auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 
 auto brace_open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   if(pos + 1 < src.size() && src[pos+1] == '[') [[unlikely]] {
-    lexer.openstack_.push_back(tokc::RDBRACE);
+    lexer.openstack_.push_back({tokc::RDBRACE, lexer.buffer_.toks.size()});
+    // lexer.openstack_.push_back({symetrical_table[src[pos]], lexer.buffer_.toks.size()});
     pos++;
     lexer.push(tokc::LDBRACE, bpos, pos+1);
     pos++;
@@ -416,25 +418,29 @@ auto brace_open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 
 
 static constexpr auto close_check = [](tokc::e r,
-                              DISPATCH_ARGS_DECL) constexpr -> void {
+                              DISPATCH_ARGS_DECL) constexpr -> auto {
   if (LLVM_UNLIKELY(lexer.openstack_.empty()))
     err("Openstack is empty", DISPATCH_ARGS);
-  else if (LLVM_UNLIKELY(lexer.openstack_.back() != r))
+  else if (LLVM_UNLIKELY(lexer.openstack_.back().first != r))
     err("Wrong closing symetrical token", DISPATCH_ARGS);
   // --lexer.depth_;
+  auto val = lexer.openstack_.back();
   lexer.openstack_.pop_back();
+  return val;
+
 };
 
 auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   {
     // auto t = one_char_tok_lut[src[pos]];
-    close_check(one_char_tok_lut[src[pos]], DISPATCH_ARGS);
-
+    auto val = close_check(one_char_tok_lut[src[pos]], DISPATCH_ARGS);
+    
     if (LLVM_UNLIKELY(
             !tokc::is_open_symetrical(lexer.buffer_.toks.back().type_) &&
             lexer.buffer_.toks.back().type_ != tokc::ENDSTMT))
       lexer.push(tokc::ENDSTMT, bpos, pos + 1);
 
+    lexer.symetrical_index_map[val.second] = lexer.buffer_.toks.size();
     lexer.push(tokc::ENDGROUP, bpos, pos + 1);
     // ++lexer.depth_;
     ++pos;
@@ -447,7 +453,7 @@ auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 auto brace_close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   if(pos + 1 < src.size() && src[pos+1] == ']') [[unlikely]]{
     pos++;
-    close_check(tokc::RDBRACE,DISPATCH_ARGS);
+    close_check(tokc::RDBRACE, DISPATCH_ARGS);
 
     if (LLVM_UNLIKELY( 
             !tokc::is_open_symetrical(lexer.buffer_.toks.back().type_) &&
@@ -573,11 +579,13 @@ next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 }
 } // namespace dispatch
 
-auto entry(const src_buffer_t *src) -> token_buffer_t  {
+__attribute__((visibility("default")))
+auto entry(const src_buffer_t *src) -> std::tuple<token_buffer_t, std::map<size_t, size_t>>  {
   lexer_t lexer;
   lexer.buffer_.toks = podlist_t<token_t>::create(64);
   lexer.buffer_.locs = podlist_t<srcloc_t>::create(64 * 4);
-  lexer.openstack_ = podlist_t<tokc::e>::create(64);
+  lexer.openstack_ = podlist_t<std::pair<tokc::e,size_t>>::create(64);
+  lexer.symetrical_index_map = {};
   lexer.buffer_.src = src;
 
   lexer.push(tokc::e::BEGINSYMETRICAL, 0, 0);
@@ -598,7 +606,7 @@ auto entry(const src_buffer_t *src) -> token_buffer_t  {
   lexer.buffer_.locs.shrink_to_fit();
 
   lexer.openstack_.release();
-  return std::move(lexer.buffer_);
+  return {std::move(lexer.buffer_), lexer.symetrical_index_map};
   // return 0;
 }
 

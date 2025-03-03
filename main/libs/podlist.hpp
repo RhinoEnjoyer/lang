@@ -73,9 +73,8 @@ struct podlist_t {
   const T& at(len_t index) const { return begin_[index]; }
 
   void resize(const len_t newcap) {
-    T* const re = static_cast<T*>(realloc(begin_, newcap * sizeof(T)));
+    T *const re = (T *)realloc(begin_, newcap * sizeof(T));
     // if(re){
-
     begin_ = re;
     cap_ = newcap;
     // }
@@ -138,7 +137,7 @@ struct podlist_t {
 #define PODLIST_GROWTH_FACTOR ((cap_ > 50000) ? 2 : 30.0)
   // #define PODLIST_GROWTH_FACTOR 1.1
   void push_back(const T& val) {
-    if (__builtin_expect((bool)(len_ == cap_), false))
+    if (len_ == cap_) [[unlikely]]
       resize(cap_ * PODLIST_GROWTH_FACTOR + 1);
     memcpy(begin_ + len_, &val, sizeof(T));
     // *(begin_ + len_) = std::move(val);
@@ -146,7 +145,7 @@ struct podlist_t {
     ++len_;
   }
   void push_back(T&& val) {
-    if (__builtin_expect((bool)(len_ == cap_), false))
+    if (len_ == cap_) [[unlikely]]
       resize(cap_ * PODLIST_GROWTH_FACTOR + 1);
     memcpy(begin_ + len_, &val, sizeof(T));
     ++len_;
@@ -305,51 +304,7 @@ struct podlist_t {
                            const podlist_iterator_t &b) {
       return a.ptr_ >= b.ptr_;
     }
-    // // Pre-increment
-    // podlist_iterator_t& operator++() {
-    //   ptr_++;
-    //   return *this;
-    // }
-
-    // // Post-increment
-    // podlist_iterator_t operator++(int) {
-    //   podlist_iterator_t tmp = *this;
-    //   ++(*this);
-    //   return tmp;
-    // }
-
-    // // Pre-decrement
-    // podlist_iterator_t& operator--() {
-    //   ptr_--;
-    //   return *this;
-    // }
-
-    // // Post-decrement
-    // podlist_iterator_t operator--(int) {
-    //   podlist_iterator_t tmp = *this;
-    //   --(*this);
-    //   return tmp;
-    // }
-
-    // // Adding/subtracting an offset
-    // podlist_iterator_t operator+(int offset) const {
-    //   return podlist_iterator_t(ptr_ + offset);
-    // }
-    // podlist_iterator_t operator-(int offset) const {
-    //   return podlist_iterator_t(ptr_ - offset);
-    // }
-
-    // // Equality/Inequality comparison
-    // friend bool operator==(const podlist_iterator_t& a,
-    //                        const podlist_iterator_t& b) {
-    //   return a.ptr_ == b.ptr_;
-    // }
-
-    // friend bool operator!=(const podlist_iterator_t& a,
-    //                        const podlist_iterator_t& b) {
-    //   return a.ptr_ != b.ptr_;
-    // }
-
+  
     pointer base() const { return ptr_; }
 
     inline podlist_iterator_t& advance(len_t off = 1){

@@ -6,13 +6,15 @@
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/ADT/StringSwitch.h>
-#include <llvm/Support/Compiler.h>
+#include <map>
 
+//@TODO: there is something wrong with my source locations
 namespace lexer {
 using pos_t = ssize_t;
 struct lexer_t {
   token_buffer_t buffer_;
-  podlist_t<tokc::e> openstack_;
+  podlist_t<std::pair<tokc::e, size_t>> openstack_;
+  std::map<size_t, size_t> symetrical_index_map;
   std::int32_t line_ = 0;
   std::int32_t line_begin_ = 0;
 
@@ -23,5 +25,5 @@ struct lexer_t {
         srcloc_t{line_ + 1, static_cast<std::int32_t>(end - begin), begin});
   }
 };
-  auto entry(const src_buffer_t *src) -> token_buffer_t;
+  auto entry(const src_buffer_t *src) -> std::tuple<token_buffer_t, std::map<size_t, size_t>>;
 };

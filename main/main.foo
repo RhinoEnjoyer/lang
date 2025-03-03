@@ -1,21 +1,66 @@
-type: @type = @rec(
-  a: s32;
+ core: @scope (
+   allocator_t: @type = @rec(
+     type: @scope(
+       alloc_fn:  @type =  @fn(alloc_ptr: @ptr; size: u64)(@ptr);
+       realloc_fn:@type =  @fn(alloc_ptr: @ptr; ptr: @ptr; size: u64)(@ptr);
+       free_fn:   @type =  @fn(alloc_ptr: @ptr; ptr: @ptr);
+     );
+
+     aptr: @ptr;
+     internal: @scope(
+       alloc: ~type::malloc_fn;
+       realloc:~type::realloc_fn;
+       free:   ~type::free_fn;
+     );
+
+     alloc:   @fn(size: u64)(@ptr) = internal::alloc(aptr; size);
+     realloc: @fn(ptr: @ptr; size: u64)(@ptr) = internal::realloc(aptr; ptr; size);
+     free:    @fn(ptr: @ptr;) = internal::free(aptr; ptr);
+   );
+
+   pool_t: @type = @rec(
+     data: @ptr;
+     size: u64;
+     capacity: u64;
+
+     alloc: allocator_t::type::alloc_fn = (
+       pool := @as{~pool_t}aptr;
+
+       size + pool::size ->
+         @if(@pipe > pool::capacity)
+             (@ret @null);
+
+       //should pointers be incrementable?
+       // if so should they be by their (+ (* type_size amount))
+       // or by the (+ amount)
+       res := data + pool::size;
+       pool::size += size;
+       @ret res;
+     );
+
+     // realloc: allocator_t::type::realloc_fn = @null;
+     // free: allocator_t::type::free_fn = ();
+
+     // make: @fn(mem: @ptr;capacity: u64)(pool_t) = (@ret {pool_t}::(mem; 0; capacity));
+
+     make_allocator: @fn()(allocator_t) = (
+       @ret {allocator_t}::(@self; pool_t::malloc; pool_t::realloc; pool_t::free);
+     );
+   );
+ );
+
+main: @fn(argc: s32; argv: ~~u8)(s32) = (
+   pool := @as{u64}1000 -> pool_t::make(c::malloc(@pipe); @pipe);
+   allocator := pool::make_allocator();
+   val: ~s32 = allocator::alloc();
 );
 
-oo: @ptr;
+var1: @typeof(a) = 10;
+var2 := @as{s32}10 + @sizeof(10 + 20) + @sizeof{s32};
+(link1)::link2::link3;
+a := {booba_t}::(a;b;c;d;e);
+h := {s32}::(10;20;30);
+// h2 := @fn(a: s32)(s32)::(booba);
 
-scope: @scope(
-  scope2: @scope(
-    type: @type = s32;
-  );
-);
-
-b := @({s32}::(10); {scope::scope2::type}::(10));
-c: @(s32; scope::scope2::type);
-
-//colletions need to be figured out
-ooo: @type = @collection(
-  a:s32;
-  b:b32;
-  c:f128;
-);
+@if(a)(body)
+          (body);

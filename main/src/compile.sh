@@ -2,7 +2,7 @@
 
 EXEC_NAME='main'
 COMPLILER='clang++'
-FLAGS='-std=c++23 -Wno-c++20-extensions -Wno-c++23-extensions'
+FLAGS='-std=c++23 -Wno-c++20-extensions -Wno-c++23-extensions -s -fvisibility=hidden'
 OLVL='-O3' 
 GLVL='-g0'
 LLVM_CONF='-lLLVM-19'
@@ -21,4 +21,4 @@ $COMPLILER $GLVL $OLVL $FLAGS --shared -o lexer.so ./frontend/lexer.cpp -fPIC &
 wait
 
 echo "Compiling Main"
-$COMPLILER $GLVL $OLVL $FLAGS $LLVM_CONF -o $EXEC_NAME  ./main.cpp ./parser.so ./lexer.so -lfmt
+$COMPLILER $GLVL $OLVL $FLAGS $LLVM_CONF  -o $EXEC_NAME  ./main.cpp ./parser.so ./lexer.so -lboost_program_options 
