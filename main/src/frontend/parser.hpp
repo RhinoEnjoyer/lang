@@ -1,19 +1,11 @@
 #pragma once
 #include "../median_enum.hpp"
 #include "../overloaded.hpp"
-#include "../str_lit.hpp"
 #include "../token.hpp"
-#include "../token_str.hpp"
-
-#include <cstdlib>
-#include <cstring>
 
 #include <array>
-#include <iostream>
 #include <map>
-#include <span>
-#include <type_traits>
-#include <utility>
+// #include <type_traits>
 #include <variant>
 
 namespace grammar {
@@ -25,7 +17,7 @@ struct node_t {
   struct median_t {
     using code_t = medianc::e;
     code_t type_;
-    std::int16_t len_;
+    std::int32_t len_;
 
     // I am not sure if I should support this
     //  good for debuging and error messages I guess
@@ -142,7 +134,7 @@ struct node_t {
       }
       auto empty() const -> bool { return begin_ == end_; }
       auto size() const -> size_t { return end_ - begin_; }
-      auto contain(iterator val) const {
+      auto contains(iterator val) const {
         return (val >= begin() && val < end());
       }
       auto size2() -> size_t {
@@ -203,13 +195,8 @@ struct node_t {
       return span_t{p, b, e};
     }
 
-    struct external_node;
-    auto fchild() const -> node_t& {
-      // node_type *p = node;
+    auto fchild() const -> node_t & {
       node_type *b = node + 1;
-
-      // auto plus = node->as_raw_median().len_;
-      // node_type *e = node + plus;
       return *(node + 1);
     }
   };

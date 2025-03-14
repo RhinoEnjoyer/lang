@@ -31,8 +31,6 @@ struct token_t {
   }
 };
 
-// srcloc_t = 16 bytes each
-// token_t  = 4 bytes each
 
 struct token_buffer_t {
   vec<token_t> toks;

@@ -8,7 +8,7 @@
 #include <llvm/ADT/StringSwitch.h>
 #include <map>
 
-//@TODO: there is something wrong with my source locations
+// TODO: there is something wrong with the source locations
 namespace lexer {
 using pos_t = ssize_t;
 struct lexer_t {

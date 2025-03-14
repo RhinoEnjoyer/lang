@@ -9,6 +9,7 @@ enum e : e_type {
   first = tokc::e::last,
 #define MEDIAN_CODE(code) code,
 #include "median.def"
+  any,
   last
 };
 

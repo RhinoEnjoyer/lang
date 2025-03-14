@@ -4,7 +4,6 @@
 #include "../table.hpp"
 #include "./parser.hpp"
 
-#include <cstddef>
 #include <print>
 #include <stdexcept>
 #include <string_view>
@@ -13,6 +12,20 @@
 #include <utility>
 #include <variant>
 
+
+//Multi files
+// start form one file
+// discover other files
+// spawn threads
+// when resolving a symbol
+// how to be able to retrieve the data???
+//   virtual locale class??
+// ban variable declarations on top level ??
+// (separate functions form variables a bit more??)
+//  
+// 
+
+
 #define VAR_MACRO(name, ...)                                                   \
   using name##_var = var<__VA_ARGS__>;                                         \
   struct name##_t : public name##_var {                                        \
@@ -20,17 +33,15 @@
     using name##_var::operator=;                                               \
   }
 
+
 namespace semantics {
 
 struct decl_t;
 struct type_t;
 struct expr_t;
-
-namespace stmt_s {
-  struct unwrap_decl_arr_t;
-}
 struct stmts_t;
 struct locale_t;
+struct context_t;
 
 using node_t = grammar::node_t::external_node;
 using span_t = grammar::node_t::median_proxy_t<false>::span_t;
@@ -39,20 +50,30 @@ using median_t = grammar::node_t::median_proxy_t<false>;
 using final_t = grammar::node_t::final_t;
 using err_t = grammar::node_t::err_t;
 
+struct ask_t {
+  virtual sptr<locale_t> get_locale() = 0;
+};
+
 struct unresolved_t {
   median_t med;
 };
 
 namespace decl_s {
-struct scope_decl_t {
+struct scope_decl_t : public ask_t {
   sptr<locale_t> loc;
   sptr<stmts_t> stmts;
+
+  scope_decl_t(sptr<locale_t> l, sptr<stmts_t> s) : loc(l), stmts(s) {}
+
+  sptr<locale_t> get_locale() override { return loc; }
 };
+
 struct var_decl_t {
   opt<bool> mut;
   sptr<type_t> type;
   sptr<expr_t> expr;
 };
+
 struct type_decl_t {
   sptr<type_t> type;
 };
@@ -62,13 +83,17 @@ struct unwrap_decl_elm_t {
   sptr<expr_t> init_val;
 };
 
-using var =
-    var<empty_t, unresolved_t, unwrap_decl_elm_t, var_decl_t, scope_decl_t, type_decl_t>;
+struct fn_decl_t {
+  sptr<type_t> sig;
+  sptr<expr_t> body;
+};
+
+using var = var<empty_t, unresolved_t, fn_decl_t, unwrap_decl_elm_t, var_decl_t,
+                scope_decl_t, type_decl_t>;
 } // namespace decl_s
 
 struct decl_t : public decl_s::var {
   using decl_s::var::variant;
-
   std::string_view name;
   size_t dindex;
 
@@ -79,7 +104,8 @@ struct decl_t : public decl_s::var {
       : decl_s::var(empty_t{}), name(n), dindex(i) {}
 
   decl_t &operator=(const auto &rhs) {
-    // only update the underlying variant portion, leaving name and dindex intact.
+    // only update the underlying variant portion, leaving name and dindex
+    // intact.
     static_cast<decl_s::var &>(*this) = rhs;
     return *this;
   }
@@ -88,7 +114,7 @@ struct decl_t : public decl_s::var {
   decl_t &operator=(auto &&rhs) {
     static_cast<decl_s::var &>(*this) = std::move(rhs);
     return *this;
-  }    
+  }
 };
 
 namespace type_s {
@@ -96,10 +122,11 @@ using type_ptr = sptr<type_t>;
 
 struct bitsize_t {
   size_t size;
+
   bitsize_t(size_t s) : size(s) {}
   bitsize_t(std::string_view str)
       : size(std::stoull(std::string(str.substr(1)))) {}
-
+ 
   auto tobyte() -> size_t { return size / 8; }
 };
 struct float_t : public bitsize_t {
@@ -141,33 +168,74 @@ using indirection_t = var<ref_t, ptr_t, optr_t>;
 struct void_t {};
 VAR_MACRO(primitive, void_t, indirection_t, numeric_t);
 
-struct rec_t {
+struct rec_t: public ask_t {
   sptr<locale_t> loc;
+  list<sptr<decl_t>> targs;
   sptr<stmts_t> members;
+
+  rec_t(sptr<locale_t> l, list<sptr<decl_t>>& t, sptr<stmts_t> m)
+      : ask_t(), loc(l), targs(t), members(m) {}
+  rec_t(sptr<locale_t> l, list<sptr<decl_t>>&& t, sptr<stmts_t> m)
+      : ask_t(), loc(l), targs(std::move(t)), members(m) {}
+
+  sptr<locale_t> get_locale() override { return loc; }
 };
 struct tup_t {
-  list<type_ptr> types;
+  list<sptr<type_t>> types;
 };
 VAR_MACRO(aggregate, rec_t, tup_t);
-
-struct fnsig_t {
-  sptr<locale_t> locale;
+struct template_args_t{
   list<sptr<decl_t>> args;
+};
+
+struct fnsig_t: public ask_t {
+  sptr<locale_t> locale;
+  template_args_t template_args;
+  list<ssptr<decl_s::var_decl_t, decl_t>> args;
   sptr<type_t> ret_type;
+
+  fnsig_t(sptr<locale_t> l, template_args_t ta,
+          list<ssptr<decl_s::var_decl_t, decl_t>> &a, sptr<type_t> r)
+      : ask_t(), locale(l), template_args(ta), args(a), ret_type(r) {}
+
+  fnsig_t(sptr<locale_t> l, template_args_t ta,
+          list<ssptr<decl_s::var_decl_t, decl_t>> &&a, sptr<type_t> r)
+      : ask_t(), locale(l), template_args(ta), args(std::move(a)), ret_type(r) {
+  }
+
+  sptr<locale_t> get_locale() override { return locale; }
+
 };
-struct fn_t {
+struct fn_t: public ask_t {
   sptr<fnsig_t> sig;
+
+  fn_t(sptr<fnsig_t> s): ask_t(), sig(s)  {}
+  
   // sptr<stmts_t> body;
+  sptr<locale_t> get_locale() override { return sig->get_locale(); }
+
 };
-struct closure_t {
+struct closure_t: public ask_t {
   sptr<fnsig_t> sig;
+
+  closure_t(sptr<fnsig_t> s): ask_t(), sig(s)  {}
+  sptr<locale_t> get_locale() override { return sig->get_locale(); }
   // sptr<stmts_t> body;
 };
 VAR_MACRO(callable, fn_t, closure_t);
 
 struct infered_t {};
-using var = var<empty_t, infered_t, primitive_t, aggregate_t, callable_t,
-                unresolved_t>;
+
+struct type_decl_ref_t {
+  ssptr<decl_s::type_decl_t, decl_t> ref;
+};
+
+struct type_ref_t {
+  sptr<type_t> ref;
+};
+
+using var = var<empty_t, type_ref_t, type_decl_ref_t, infered_t, primitive_t, aggregate_t,
+                callable_t, unresolved_t>;
 } // namespace type_s
 struct type_t : public type_s::var {
   using type_s::var::variant;
@@ -237,7 +305,7 @@ struct address_t : op_unary_base<11, op_assoc_e::RIGHT> {};
 struct as_t      : op_unary_base<10, op_assoc_e::RIGHT> {sptr<type_t> type;};
 VAR_MACRO(operator, pipe_t, neg_t, deref_t, address_t, as_t, assignment_t, binary_t, comparison_t, arithmetic_t);
 
-auto token_to_operator(tokc::e token) -> operator_t {
+auto token_to_operator(const tokc::e token) -> operator_t {
   switch (token) {
   case tokc::EQUALS:
     return eq_t{};
@@ -311,6 +379,7 @@ struct number_t {
 struct fncall_t {
   list<sptr<expr_t>> args;
 };
+
 struct decl_access_t {
   sptr<decl_t> decl;
 };
@@ -320,7 +389,7 @@ struct decl_access_t {
 //  but anyother should be just an expresion list
 struct complit_t {
   sptr<type_t> type;
-  list<sptr<expr_t>> init;
+  list<sptr<expr_t>> init_vals;
 };
 
 struct sizeof_t {
@@ -352,8 +421,18 @@ struct if_t{
   std::optional<else_t> el;
 };
 
+//chain like
+struct fn_lit_t {
+  ssptr<type_s::callable_t, type_t> sig;
+  sptr<stmts_t> body;
+};
 
-VAR_MACRO(operand, unresolved_t, if_t, complit_t, fncall_t, number_t, sizeof_t, decl_access_t, result_t);
+struct decl_ref_t {
+  sptr<decl_t> decl;
+};
+
+VAR_MACRO(operand, unresolved_t, decl_ref_t, fn_lit_t, if_t, complit_t,
+          fncall_t, number_t, sizeof_t, decl_access_t, result_t);
 using var = var<empty_t, operator_t, operand_t>;
 } // namespace expr_s
 struct expr_elm_t : public expr_s::var {
@@ -364,7 +443,8 @@ struct expr_t {
 };
 
 namespace stmt_s {
-struct unwrap_decl_arr_t{
+
+struct unwrap_decl_arr_t {
   list<sptr<decl_t>> wraps;
 };
 
@@ -428,24 +508,24 @@ struct locale_t {
     const entry_t symbol;
   };
 
-  template <typename t> struct slookup_t {
+  template <typename SPECIALISED_TYPE> struct slookup_t {
     const bool found;
     const path_t path;
-    const ssptr<t, decl_t> symbol;
+    const ssptr<SPECIALISED_TYPE, decl_t> symbol;
   };
 
   sptr<locale_t> parent_;
 
   // general
-  static sptr<locale_t> make_child(sptr<locale_t> self) {
-    return make_sptr(locale_t{self, {}});
+  static sptr<locale_t> make_child(auto& ctx, sptr<locale_t> self) {
+    return ctx.make_sptr(locale_t{self, {}});
   }
 
   sptr<locale_t> parent() { return parent_; }
 
   // implementation specific
   struct internal {
-    std::unordered_map<std::string_view, entry_t> table;
+    std::unordered_map<std::string_view, entry_t> table = {};
     static lookup_t ancestor_lookup(sptr<locale_t> self, path_t &path,
                                     const std::string_view name) {
       return lookup<false>(self, path, name);
@@ -464,9 +544,9 @@ struct locale_t {
         return {true, path, it->second};
 
       if constexpr (!is_local_search)
-        if (self->parent_)
+        if (self->parent_) {
           return ancestor_lookup(self->parent_, path, name);
-
+        }
       return {false, path, {nullptr}};
     }
 
@@ -490,10 +570,10 @@ struct locale_t {
     return internal::lookup<true>(self, path, name);
   }
 
-  template <typename var_type, auto lookup_fn = local_lookup>
+  template <typename VAR_TYPE, auto lookup_fn = local_lookup>
   static auto expect_lookup(sptr<locale_t> self, const std::string_view name)
-      -> slookup_t<var_type> {
-    using ret_type = slookup_t<var_type>;
+      -> slookup_t<VAR_TYPE> {
+    using ret_type = slookup_t<VAR_TYPE>;
 
     static_assert(lookup_fn == locale_t::local_lookup ||
                       lookup_fn == locale_t::ancestor_lookup,
@@ -501,23 +581,41 @@ struct locale_t {
 
     const lookup_t lookup = lookup_fn(self, name);
 
-    if (!lookup.found || !std::holds_alternative<var_type>(*lookup.symbol))
-      return ret_type{false, std::move(lookup.path)};
+    if (!lookup.found || !std::holds_alternative<VAR_TYPE>(*lookup.symbol))
+      return ret_type{false, std::move(lookup.path), sptr<decl_t>{}};
 
-    return ret_type{true, std::move(lookup.path), std::move(lookup.symbol)};
+    return ret_type{true, std::move(lookup.path), lookup.symbol};
   }
 };
 
+using resolve_callback_t = std::function<void()>;
 struct context_t {
   const token_buffer_t &toks;
   size_t cindex = 0;
+
+  allocator_t &allocator;
+
+  list<resolve_callback_t> callbacks = {};
+
   size_t operator++() { return cindex++; }
+  static std::size_t size;
+
+  template <typename T, typename... Args>
+  auto make_sptr(Args &&...val) -> sptr<T> {
+    return make_ptr<T, Args...>(allocator, std::forward<Args>(val)...);
+  }
+  template <typename T> auto make_sptr(T &&val) -> sptr<T> {
+    return make_ptr<T>(allocator, val);
+  }
+  template <typename T> auto make_sptr(T &val) -> sptr<T> {
+    return make_ptr<T>(allocator, val);
+  }
 };
 
 struct cursor_helper_t {
-  cursor_helper_t(span_t s) : span_(s), cursor_(s.begin()) {}
+  cursor_helper_t(const span_t s) : span_(s), cursor_(s.begin()) {}
 
-  template <auto in = medianc::VIRTUAL_EMPTY, typename in_t = decltype(in),
+  template <auto in = medianc::any, typename in_t = decltype(in),
             typename t = std::conditional_t<std::is_same_v<in_t, medianc::e>,
                                             median_t, final_t>>
   std::optional<t> extract() {
@@ -525,12 +623,12 @@ struct cursor_helper_t {
                       std::is_same_v<in_t, tokc::e>,
                   "in must be a medianc::e or a tokc::e");
 
-    if (!within() || !std::holds_alternative<t>(cursor_->node())) {
+    if (!within() || !std::holds_alternative<t>(cursor_->node()))
       return std::nullopt;
-    }
+
     if constexpr (std::is_same_v<t, median_t>) {
-      auto med = cursor_->as_median();
-      if constexpr (in == medianc::VIRTUAL_EMPTY) {
+      const auto med = cursor_->as_median();
+      if constexpr (in == medianc::any) {
         cursor_.advance();
         return med;
       } else {
@@ -540,8 +638,8 @@ struct cursor_helper_t {
         }
       }
     } else if constexpr (std::is_same_v<t, final_t>) {
-      auto fin = cursor_->as_final();
-      if constexpr (in == tokc::VIRTUAL_EMPTY) {
+      const auto fin = cursor_->as_final();
+      if constexpr (in == tokc::any) {
         cursor_.advance();
         return fin;
       } else {
@@ -565,7 +663,8 @@ struct cursor_helper_t {
       }
     }
   }
-  template <auto... ins,
+  template <
+      auto... ins,
       typename ret = std::tuple<std::optional<std::conditional_t<
           std::is_same_v<decltype(ins), medianc::e>, median_t, final_t>>...>>
   auto tuple_extract() -> ret {
@@ -574,7 +673,7 @@ struct cursor_helper_t {
     return tup;
   }
 
-  bool within() const { return span_.contain(cursor_); }
+  bool within() const { return span_.contains(cursor_); }
 
 private:
   span_t span_;

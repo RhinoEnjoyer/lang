@@ -3,11 +3,10 @@
 #include <array>
 #include <print>
 
-
-//make the lexer create separate tables for 
-// each symbol that starts with the same char
-// so we have to match on less chars.
-// This should be done programmaticaly
+// make the lexer create separate tables for
+//  each symbol that starts with the same char
+//  so we have to match on less chars.
+//  This should be done programmaticaly
 namespace lexer {
 
 #define DISPATCH_RETURN int32_t
@@ -117,8 +116,9 @@ constexpr auto whitespace_table = [] consteval {
   return table;
 }();
 
-[[clang::always_inline]] inline auto
-scan_for_word(llvm::StringRef src, pos_t pos) -> llvm::StringRef {
+[[clang::always_inline]] inline auto scan_for_word(llvm::StringRef src,
+                                                   pos_t pos)
+    -> llvm::StringRef {
   const std::size_t size = src.size();
 
   while (pos < static_cast<pos_t>(size) &&
@@ -127,16 +127,18 @@ scan_for_word(llvm::StringRef src, pos_t pos) -> llvm::StringRef {
   return src.substr(0, pos);
 }
 
-[[clang::always_inline]] inline auto
-scan_for_number(llvm::StringRef src, pos_t pos) -> llvm::StringRef {
+[[clang::always_inline]] inline auto scan_for_number(llvm::StringRef src,
+                                                     pos_t pos)
+    -> llvm::StringRef {
   const std::size_t size = src.size();
   while (pos < static_cast<pos_t>(size) && '0' <= src[pos] && src[pos] <= '9')
     ++pos;
   return src.substr(0, pos);
 }
 
-[[clang::always_inline]] inline auto
-scan_for_symbol(llvm::StringRef src, pos_t pos) -> llvm::StringRef {
+[[clang::always_inline]] inline auto scan_for_symbol(llvm::StringRef src,
+                                                     pos_t pos)
+    -> llvm::StringRef {
   const std::size_t size = src.size();
   while (pos < static_cast<pos_t>(size) && symbol_sequence_bytes[src[pos]])
     ++pos;
@@ -162,8 +164,8 @@ vwhitespace(lexer_t &lexer, llvm::StringRef src, pos_t &pos) -> void {
     lexer.line_begin_ = pos;
   }
 }
-[[clang::always_inline]] auto word(llvm::StringRef src,
-                                   pos_t &pos) -> llvm::StringRef {
+[[clang::always_inline]] auto word(llvm::StringRef src, pos_t &pos)
+    -> llvm::StringRef {
   // CCHECK(id_start_byte_lut[src[pos]]);
 
   const auto idtext = scan_for_word(src.substr(pos), 0);
@@ -172,8 +174,8 @@ vwhitespace(lexer_t &lexer, llvm::StringRef src, pos_t &pos) -> void {
   pos += idtext.size();
   return idtext;
 }
-[[clang::always_inline]] auto number(llvm::StringRef src,
-                                     pos_t &pos) -> llvm::StringRef {
+[[clang::always_inline]] auto number(llvm::StringRef src, pos_t &pos)
+    -> llvm::StringRef {
   // CCHECK(id_start_byte_lut[src[pos]]);
 
   const auto idtext = scan_for_number(src.substr(pos), 0);
@@ -181,8 +183,8 @@ vwhitespace(lexer_t &lexer, llvm::StringRef src, pos_t &pos) -> void {
   pos += idtext.size();
   return idtext;
 }
-[[clang::always_inline]] auto symbol(llvm::StringRef src,
-                                     pos_t &pos) -> llvm::StringRef {
+[[clang::always_inline]] auto symbol(llvm::StringRef src, pos_t &pos)
+    -> llvm::StringRef {
   // CCHECK(id_start_byte_lut[src[pos]]);
   const auto symbol_text = scan_for_symbol(src.substr(pos), 0);
 
@@ -206,8 +208,8 @@ auto next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN;
 [[clang::noinline]]
 auto err(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   llvm::errs() << "Line: " << lexer.line_ << '\n';
-  llvm::errs() << "Error: Unexpected char \' " << src[pos] << " \' at index " << pos
-               << '\n';
+  llvm::errs() << "Error: Unexpected char \' " << src[pos] << " \' at index "
+               << pos << '\n';
   std::exit(EXIT_FAILURE);
 }
 
@@ -249,7 +251,8 @@ auto integral_id(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
     return err("ID needs to have charactes in it", DISPATCH_ARGS);
 
   tokc::e type = tokc::ID;
-  //floats have a specific size so they do not really need to be here but it is still ok
+  // floats have a specific size so they do not really need to be here but it is
+  // still ok
   if (text.size() != 1 &&
       std::all_of(text.begin() + 1, text.end(),
                   [](unsigned char c) { return std::isdigit(c); })) {
@@ -280,7 +283,7 @@ auto number(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   tokc::e type = tokc::e::INT;
   // bad for perfomance
   // maybe use a smaller dispatch table??
-  //TABLE 1
+  // TABLE 1
   bool dot = false;
 AGAIN:
   if (LLVM_LIKELY(pos < src.size())) {
@@ -303,9 +306,10 @@ AGAIN:
     }
   }
 
-  //TABLE 2
-  // same goes for this one
-  if (LLVM_LIKELY(pos < src.size() && LLVM_UNLIKELY(src[pos] == 'e'))) { /* exponent */
+  // TABLE 2
+  //  same goes for this one
+  if (LLVM_LIKELY(pos < src.size() &&
+                  LLVM_UNLIKELY(src[pos] == 'e'))) { /* exponent */
     ++pos;
     if (LLVM_LIKELY(src[pos] == '+' || src[pos] == '-'))
       ++pos;
@@ -317,27 +321,27 @@ AGAIN:
       err("Need to have a valid Exponent", DISPATCH_ARGS);
   }
 
-   //TABLE 3
+  // TABLE 3
   // and this one
   if (pos < src.size() &&
-      LLVM_UNLIKELY(   !whitespace_table[src[pos]] 
-                    && !symbol_sequence_bytes[src[pos]] 
-                    && src[pos] != ';' 
-                    && !symetrical_close_table_bool[src[pos]] //This used to be symetrical_table_bool 
-                  )
-    )
+      LLVM_UNLIKELY(
+          !whitespace_table[src[pos]] && !symbol_sequence_bytes[src[pos]] &&
+          src[pos] != ';' &&
+          !symetrical_close_table_bool[src[pos]] // This used to be
+                                                 // symetrical_table_bool
+          ))
     err("Invalid following symbol after a number ", DISPATCH_ARGS);
 
   lexer.push(type, bpos, pos);
   become next(DISPATCH_ARGS);
 }
 
-//this is good idea to do
-// automaticaly build tables that lead to a function that leads to tables
-// 
-// Get all the possible symbols
-// sort them by length
-// match usinging that list
+// this is good idea to do
+//  automaticaly build tables that lead to a function that leads to tables
+//
+//  Get all the possible symbols
+//  sort them by length
+//  match usinging that list
 
 auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   auto text = lex::symbol(src, pos);
@@ -346,15 +350,15 @@ auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 
   auto subbegin = text.begin();
   auto len = text.size();
-  #define TOKEN_SYMBOL_SEQUENCE(spelling, code) .Case(spelling, tokc::e::code)
+#define TOKEN_SYMBOL_SEQUENCE(spelling, code) .Case(spelling, tokc::e::code)
 
   // A smarter person would make sure to make distinctions for the tokens that
   // can only have one char. That person ain't me.
   do {
     const auto view = llvm::StringRef(subbegin, len);
     const auto r = llvm::StringSwitch<tokc::e>(view)
-                  #include "../token.def"
-                 .Default(tokc::e::ERROR);
+#include "../token.def"
+                       .Default(tokc::e::ERROR);
 
     if (r == tokc::e::ERROR) [[unlikely]] {
       len--;
@@ -392,33 +396,37 @@ template <auto &fn> auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 //   become next(DISPATCH_ARGS);
 // }
 
-//this should also become a symbol with a special function at the front for open and close checks
+// this should also become a symbol with a special function at the front for
+// open and close checks
 namespace symetrical {
 
 auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   static constexpr auto fn = [](tokc::e r,
                                 DISPATCH_ARGS_DECL) constexpr -> void {
-    lexer.openstack_.push_back({symetrical_table[src[pos]], lexer.buffer_.toks.size()});
+    lexer.openstack_.push_back(
+        {symetrical_table[src[pos]], lexer.buffer_.toks.size()});
     // ++lexer.depth_;
   };
   become onechar<fn>(DISPATCH_ARGS);
 }
 
 auto brace_open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
-  if(pos + 1 < src.size() && src[pos+1] == '[') [[unlikely]] {
+  if (pos + 1 < src.size() && src[pos + 1] == '[') [[unlikely]] {
     lexer.openstack_.push_back({tokc::RDBRACE, lexer.buffer_.toks.size()});
-    // lexer.openstack_.push_back({symetrical_table[src[pos]], lexer.buffer_.toks.size()});
+    // lexer.openstack_.push_back({symetrical_table[src[pos]],
+    // lexer.buffer_.toks.size()});
     pos++;
-    lexer.push(tokc::LDBRACE, bpos, pos+1);
+    lexer.push(tokc::LDBRACE, bpos, pos + 1);
     pos++;
-    { become next(DISPATCH_ARGS); }
-  } 
+    {
+      become next(DISPATCH_ARGS);
+    }
+  }
   become open(DISPATCH_ARGS);
 }
 
-
 static constexpr auto close_check = [](tokc::e r,
-                              DISPATCH_ARGS_DECL) constexpr -> auto {
+                                       DISPATCH_ARGS_DECL) constexpr -> auto {
   if (LLVM_UNLIKELY(lexer.openstack_.empty()))
     err("Openstack is empty", DISPATCH_ARGS);
   else if (LLVM_UNLIKELY(lexer.openstack_.back().first != r))
@@ -427,14 +435,13 @@ static constexpr auto close_check = [](tokc::e r,
   auto val = lexer.openstack_.back();
   lexer.openstack_.pop_back();
   return val;
-
 };
 
 auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   {
     // auto t = one_char_tok_lut[src[pos]];
     auto val = close_check(one_char_tok_lut[src[pos]], DISPATCH_ARGS);
-    
+
     if (LLVM_UNLIKELY(
             !tokc::is_open_symetrical(lexer.buffer_.toks.back().type_) &&
             lexer.buffer_.toks.back().type_ != tokc::ENDSTMT))
@@ -444,18 +451,20 @@ auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
     lexer.push(tokc::ENDGROUP, bpos, pos + 1);
     // ++lexer.depth_;
     ++pos;
-    { become next(DISPATCH_ARGS); }
+    {
+      become next(DISPATCH_ARGS);
+    }
   }
 
   // become onechar<fn>(DISPATCH_ARGS);
 }
 
 auto brace_close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
-  if(pos + 1 < src.size() && src[pos+1] == ']') [[unlikely]]{
+  if (pos + 1 < src.size() && src[pos + 1] == ']') [[unlikely]] {
     pos++;
     close_check(tokc::RDBRACE, DISPATCH_ARGS);
 
-    if (LLVM_UNLIKELY( 
+    if (LLVM_UNLIKELY(
             !tokc::is_open_symetrical(lexer.buffer_.toks.back().type_) &&
             lexer.buffer_.toks.back().type_ != tokc::ENDSTMT))
       lexer.push(tokc::ENDSTMT, bpos, pos + 1);
@@ -464,11 +473,10 @@ auto brace_close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
     // ++lexer.depth_;
     ++pos;
 
-    become next(DISPATCH_ARGS); 
-  } 
+    become next(DISPATCH_ARGS);
+  }
   become close(DISPATCH_ARGS);
 }
-
 
 // add a recovery token so we can continiue lexing
 } // namespace symetrical
@@ -479,7 +487,9 @@ auto scolon(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
     lexer.push(tokc::ENDSTMT, bpos, pos + 1);
     // ++lexer.depth_;
     ++pos;
-    { become next(DISPATCH_ARGS); }
+    {
+      become next(DISPATCH_ARGS);
+    }
   }
 
   // become onechar<fn>(DISPATCH_ARGS);
@@ -522,7 +532,6 @@ auto strlit(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 
   become next(DISPATCH_ARGS);
 }
-
 
 constexpr auto dispatch_table = [] consteval {
   dispatch_table_t table = {};
@@ -569,8 +578,8 @@ constexpr auto dispatch_table = [] consteval {
   return table;
 }();
 
-[[clang::always_inline]] inline auto
-next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+[[clang::always_inline]] inline auto next(DISPATCH_ARGS_DECL)
+    -> DISPATCH_RETURN {
   if (LLVM_UNLIKELY(!(pos < static_cast<pos_t>(src.size()))))
     return 0;
 
@@ -579,12 +588,12 @@ next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 }
 } // namespace dispatch
 
-__attribute__((visibility("default")))
-auto entry(const src_buffer_t *src) -> std::tuple<token_buffer_t, std::map<size_t, size_t>>  {
+__attribute__((visibility("default"))) auto entry(const src_buffer_t *src)
+    -> std::tuple<token_buffer_t, std::map<size_t, size_t>> {
   lexer_t lexer;
   lexer.buffer_.toks = podlist_t<token_t>::create(64);
   lexer.buffer_.locs = podlist_t<srcloc_t>::create(64 * 4);
-  lexer.openstack_ = podlist_t<std::pair<tokc::e,size_t>>::create(64);
+  lexer.openstack_ = podlist_t<std::pair<tokc::e, size_t>>::create(64);
   lexer.symetrical_index_map = {};
   lexer.buffer_.src = src;
 

@@ -1,42 +1,44 @@
-#include "./parser.hpp"
 #include "../become.hpp"
 #include "../overloaded.hpp"
+#include "./parser.hpp"
 
-#include <algorithm>
+#include "../str_lit.hpp"
+#include "../token_str.hpp"
+#include <iostream>
 #include <print>
-#include <cassert>
-#include <cstdlib>
 #include <string_view>
 #include <tuple>
 #include <utility>
-#include <variant>
 
-//we need better error handling 
+// we need better error handling
 
-//There is some jank about the use of ENDSTMT/; because sometimes it is checked by the called function
-//but sometimes it is checked and consumed by the symetrical function that is called
-//it is fine but maybe I should have it standardised
-//I have the stmt<> fucntion but that one consumes the token
-//maybe make that the one that just expects it and make another one that consumes it?
-//or the oposite?
-//idk
-//It hasn't caused any problems but it is good to have in mind in case it does
+// There is some jank about the use of ENDSTMT/; because sometimes it is checked
+// by the called function but sometimes it is checked and consumed by the
+// symetrical function that is called it is fine but maybe I should have it
+// standardised I have the stmt<> fucntion but that one consumes the token maybe
+// make that the one that just expects it and make another one that consumes it?
+// or the oposite?
+// idk
+// It hasn't caused any problems but it is good to have in mind in case it does
 
-//The comptime arguemnts have a problem for now I use the type function and when it fails I fall back to the expresion function
-//The problem is that if it detects lets say a @rec it is gonna think it is a type but it might also be a compound lit
-//one way is the only allow comp_lits when using the {@rec(a:s32)} syntax
-//There is also a problem with ids because they might refer to a type or it might be a expresion
-//so I guess we need some backtracking to go back and change the type of the median to a expresion and change the state so we can match those patterns
+// The comptime arguemnts have a problem for now I use the type function and
+// when it fails I fall back to the expresion function The problem is that if it
+// detects lets say a @rec it is gonna think it is a type but it might also be a
+// compound lit one way is the only allow comp_lits when using the {@rec(a:s32)}
+// syntax There is also a problem with ids because they might refer to a type or
+// it might be a expresion so I guess we need some backtracking to go back and
+// change the type of the median to a expresion and change the state so we can
+// match those patterns
 
-//compound literals and compiletime arguments???
-//they do not really need them
-//since 
+// compound literals and compiletime arguments???
+// they do not really need them
+// since
 
-//I should have typeof and sizeof take in type_or_expr
-// this would push some work over to the semantic analyser
-// but it would maybe help a bit with clarity 
-// we can use the context of the semantic analyser to get 
-// some better results
+// I should have typeof and sizeof take in type_or_expr
+//  this would push some work over to the semantic analyser
+//  but it would maybe help a bit with clarity
+//  we can use the context of the semantic analyser to get
+//  some better results
 
 /* @TODO */
 /* better errors */
@@ -44,12 +46,11 @@
 /* Consolidate functions for the @self and @pipe? maybe make it a unique start
  *   and but make it like a chain? */
 
- 
 namespace grammar {
 
 struct context_t {
   const token_buffer_t &toks;
-  const std::map<size_t, size_t>& smap;
+  const std::map<size_t, size_t> &smap;
   podlist_t<node_t> &nodes;
 };
 
@@ -65,12 +66,12 @@ struct context_t {
 
 using fn_t = auto DISPATCH_FNSIG;
 // using pair_t = std::pair<tokc::e,fn_t*>;
-struct pair_t{
+struct pair_t {
   tokc::e first;
-  fn_t* second;
+  fn_t *second;
 };
 
-template <std::size_t N,typename T = pair_t>
+template <std::size_t N, typename T = pair_t>
 using table_t_impl = std::array<pair_t, N>;
 
 template <typename T>
@@ -83,12 +84,11 @@ concept Table = requires(T t, std::size_t i) {
 
 template <typename T>
 concept Pair = requires(T t) {
-  {t.first};
-  {t.second};
+  { t.first };
+  { t.second };
 };
 
-template<std::size_t N>
-using table_t = table_t_impl<N>;
+template <std::size_t N> using table_t = table_t_impl<N>;
 
 template <Pair... T> static consteval auto table_t_make(T... args) -> auto {
   return table_t<sizeof...(T)>{args...};
@@ -101,10 +101,12 @@ template <std::array... args> static consteval auto table_t_make() -> auto {
   constexpr auto table = [] consteval -> auto {
     auto table = table_t<tsize>{};
     std::size_t index = 0;
-    ([&](const auto &t) consteval {
+    (
+        [&](const auto &t) consteval {
           for (std::size_t i = 0; i < t.size(); ++i)
             table[index++] = t[i];
-        }(args),...);
+        }(args),
+        ...);
     return table;
   }();
 
@@ -158,8 +160,7 @@ template <tokc::e tok = tokc::VIRTUAL_EMPTY> auto push_final DISPATCH_FNSIG {
   become push_final_impl(DISPATCH_ARGS);
 }
 
-template <node_t::median_t::code_t type, fn_t* fn>
-auto dive DISPATCH_FNSIG {
+template <node_t::median_t::code_t type, fn_t *fn> auto dive DISPATCH_FNSIG {
   ctx.nodes.push_back(node_t::make(type, 0, cursor));
   const auto parent_index = ctx.nodes.length() - 1;
   const auto index = ctx.nodes.length();
@@ -167,7 +168,7 @@ auto dive DISPATCH_FNSIG {
   fn(DISPATCH_ARGS);
 
   const auto length = ctx.nodes.length() - index;
-  auto& med= ctx.nodes.at(parent_index).as_raw_median();
+  auto &med = ctx.nodes.at(parent_index).as_raw_median();
   med.last = cursor;
   med.len_ = length;
 }
@@ -180,13 +181,14 @@ template <std::array type>
 template <tokc::e... type>
 [[nodiscard]] inline auto is(cursor_t cursor) -> bool {
   // return cursor->type_ == type;
-become is<std::array{type...}>(cursor);
+  become is<std::array{type...}>(cursor);
 }
 
 template <const tokc::e... type> auto expected DISPATCH_FNSIG {
   std::cerr << "Found str: \'" << ctx.toks.str(cursor) << "\'"
             << "\n\tType: " << ctx.toks.str(cursor)
-            << "\n\tRow: " << ctx.toks.row(cursor) << "\tCol: " << ctx.toks.col(cursor)
+            << "\n\tRow: " << ctx.toks.row(cursor)
+            << "\tCol: " << ctx.toks.col(cursor)
             << "\tLen: " << ctx.toks.len(cursor) << "\n";
 
   std::cerr << "Expected: ";
@@ -201,15 +203,21 @@ auto expr DISPATCH_FNSIG;
 template <bool compound_ext = false> auto chain DISPATCH_FNSIG;
 auto type DISPATCH_FNSIG;
 
-template <str_lit_t reason, tokc::e... type>
-auto expected DISPATCH_FNSIG {
-  std::cerr << "Err: " << reason.value<< std::endl;
+template <str_lit_t reason, tokc::e... type> auto expected DISPATCH_FNSIG {
+  std::cerr << "Err: " << reason.value << std::endl;
   expected<type...>(DISPATCH_ARGS);
 }
 
-template <tokc::e... type> auto expect DISPATCH_FNSIG {
+template <tokc::e... type>
+auto expect(context_t &ctx, cursor_t &cursor) -> void {
   if (!is<type...>(cursor)) [[unlikely]]
     become expected<type...>(DISPATCH_ARGS);
+}
+
+template <tokc::e... type>
+auto expect(context_t &ctx, cursor_t &&cursor) -> void {
+  if (!is<type...>(cursor)) [[unlikely]]
+    expected<type...>(DISPATCH_ARGS);
 }
 
 template <str_lit_t reason, tokc::e... type> auto expect DISPATCH_FNSIG {
@@ -243,10 +251,10 @@ auto path DISPATCH_FNSIG {
           }();
 
           std::cerr << "Str: \'" << ctx.toks.str(cursor) << "\'"
-                       << "\n\tType: " << token_code_str(ctx.toks.type(cursor))
-                       << "\n\tRow: " << ctx.toks.row(cursor)
-                       << "\tCol: " << ctx.toks.col(cursor)
-                       << "\tLen: " << ctx.toks.len(cursor) << "\n";
+                    << "\n\tType: " << token_code_str(ctx.toks.type(cursor))
+                    << "\n\tRow: " << ctx.toks.row(cursor)
+                    << "\tCol: " << ctx.toks.col(cursor)
+                    << "\tLen: " << ctx.toks.len(cursor) << "\n";
           std::cerr << "Failed to pick a path" << '\n' << "Expected: \n\t";
 
           for (const auto &elm : filter)
@@ -265,11 +273,10 @@ auto path DISPATCH_FNSIG {
     return table;
   }();
 
-  become dispatch_table[(cursor + match_cursor_offset)->type_](ctx,cursor);
+  become dispatch_table[(cursor + match_cursor_offset)->type_](ctx, cursor);
 }
 
-template<fn_t* fn, fn_t*... fns>
-auto sequence DISPATCH_FNSIG{
+template <fn_t *fn, fn_t *...fns> auto sequence DISPATCH_FNSIG {
   if constexpr (sizeof...(fns) == 0)
     become fn(DISPATCH_ARGS);
 
@@ -339,34 +346,35 @@ auto cbraces DISPATCH_FNSIG {
   become symetrical<fn, tokc::LCBRACE, med>(DISPATCH_ARGS);
 }
 
-template<fn_t* fn, tokc::e type, medianc::e med>
+template <fn_t *fn, tokc::e type, medianc::e med>
 auto symetrical_wrapper DISPATCH_FNSIG {
   static_assert(tokc::is_open_symetrical(type),
                 "type template argument is not a symetrical");
   expect<type>(DISPATCH_ARGS);
   advance(DISPATCH_ARGS);
-  
+
   dive < med, DISPATCH_LAM {
     fn(DISPATCH_ARGS);
 
     expect<"Failed to close symetrical wrapper", tokc::ENDGROUP>(DISPATCH_ARGS);
     advance(DISPATCH_ARGS);
-  }> (DISPATCH_ARGS);
+  }
+  > (DISPATCH_ARGS);
 }
 template <fn_t *fn, medianc::e med = medianc::PARENS>
 auto parens_wrapper DISPATCH_FNSIG {
-  become symetrical_wrapper <fn, tokc::LPAREN, med>(DISPATCH_ARGS);
+  become symetrical_wrapper<fn, tokc::LPAREN, med>(DISPATCH_ARGS);
 }
 template <fn_t *fn, medianc::e med = medianc::BRACES>
 auto braces_wrapper DISPATCH_FNSIG {
-  become symetrical_wrapper <fn, tokc::LBRACE, med>(DISPATCH_ARGS);
+  become symetrical_wrapper<fn, tokc::LBRACE, med>(DISPATCH_ARGS);
 }
 template <fn_t *fn, medianc::e med = medianc::CBRACES>
 auto cbraces_wrapper DISPATCH_FNSIG {
-  become symetrical_wrapper <fn, tokc::LCBRACE, med>(DISPATCH_ARGS);
+  become symetrical_wrapper<fn, tokc::LCBRACE, med>(DISPATCH_ARGS);
 }
 
-template<fn_t* fn> auto advance2 DISPATCH_FNSIG{
+template <fn_t *fn> auto advance2 DISPATCH_FNSIG {
   advance(DISPATCH_ARGS);
   fn(DISPATCH_ARGS);
 }
@@ -380,11 +388,10 @@ template <fn_t *fn> auto end_with_scolon DISPATCH_FNSIG {
 }
 
 auto type_or_expr DISPATCH_FNSIG;
-const auto& comptime_arg = type_or_expr;
+const auto &template_arg = type_or_expr;
 // const auto& compound_literal = type<nullptr, 1>;
 
-
-auto empty DISPATCH_FNSIG {/*Do nothing */return;}
+auto empty DISPATCH_FNSIG { /*Do nothing */ return; }
 
 static auto &as =
     sequence<advance, cbraces_wrapper<end_with_scolon<type>, medianc::AS>>;
@@ -393,45 +400,59 @@ static auto &as =
   become dbraces<chain, medianc::ATTRIBUTES>(DISPATCH_ARGS);
 }
 
-template<medianc::e wrap, fn_t* fn, fn_t* fallback = fn>
-auto attribute_path DISPATCH_FNSIG{
-  dive<wrap,
-       path<table_t_make(pair_t{tokc::LDBRACE, sequence<attributes, fn>}), fallback>>(
-      DISPATCH_ARGS);
+template <medianc::e wrap, fn_t *fn, fn_t *fallback = fn>
+auto attribute_path DISPATCH_FNSIG {
+  dive<wrap, path<table_t_make(pair_t{tokc::LDBRACE, sequence<attributes, fn>}),
+                  fallback>>(DISPATCH_ARGS);
 }
 
-auto fnsig DISPATCH_FNSIG{
+auto template_arg_decl DISPATCH_FNSIG;
+auto template_arg_list DISPATCH_FNSIG {
+  cbraces<attribute_path<medianc::ARGUMENT, template_arg_decl>,
+          medianc::TEMPLATE_ARGUMENT_LIST>(DISPATCH_ARGS);
+}
+
+// template <bool enable_state = true, bool enable_template = true>
+auto access_chain DISPATCH_FNSIG ;
+auto fnsig DISPATCH_FNSIG {
   dive < medianc::FN_SIG, DISPATCH_LAM {
     advance(DISPATCH_ARGS);
+    // Function state
+    // if constexpr (enable_state)
 
-    //Function state 
-    if (is<tokc::LBRACE>(cursor)) [[unlikely]]
+    if (is<tokc::LBRACE>(cursor))
       symetrical<expr, medianc::FN_STATE_LIST>(DISPATCH_ARGS);
 
-    //Compile time arguments declaration
-    if (is<tokc::LCBRACE>(cursor)) [[unlikely]]
-      symetrical<attribute_path<medianc::ARGUMENT,decl>, medianc::TEMPLATE_LIST_DECL>(DISPATCH_ARGS);
-    
-    if (is<tokc::LPAREN>(cursor)) [[likely]] {
-      //Runtime Arguments
-      parens<attribute_path<medianc::ARGUMENT, path<table_t_make(pair_t{tokc::BUILTIN_SELF, dive<medianc::SELF_ARG,push_final<>>}),decl>>, medianc::FN_ARGS>(DISPATCH_ARGS);
-      if (is<tokc::LPAREN>(cursor)) [[likely]]
-        //Return type
-        // parens<attribute_path<medianc::ELEMENT ,type>, medianc::FN_RET>(DISPATCH_ARGS);
-        parens_wrapper<end_with_scolon<type>, medianc::FN_RET>(DISPATCH_ARGS);
+    // Compile time arguments declaration
+    // if constexpr (enable_template)
+    if (is<tokc::LCBRACE>(cursor))
+      template_arg_list(DISPATCH_ARGS);
 
+    if (is<tokc::LPAREN>(cursor)) [[likely]] {
+      // Runtime Arguments
+      parens<attribute_path<medianc::ARGUMENT,
+                            path<table_t_make(pair_t{
+                                     tokc::BUILTIN_SELF,
+                                     dive<medianc::SELF_ARG, push_final<>>}),
+                                 decl>>,
+             medianc::FN_ARGS>(DISPATCH_ARGS);
+      if (is<tokc::LPAREN>(cursor)) [[likely]]
+        // Return type
+        //  parens<attribute_path<medianc::ELEMENT ,type>,
+        //  medianc::FN_RET>(DISPATCH_ARGS);
+        parens_wrapper<end_with_scolon<type>, medianc::FN_RET>(DISPATCH_ARGS);
+    } else if (is<tokc::MINUSGREATER>(cursor)) {
+      advance(DISPATCH_ARGS);
+      parens_wrapper<end_with_scolon<type>, medianc::FN_RET>(DISPATCH_ARGS);
     }
   }
   > (DISPATCH_ARGS);
 };
 
-template<medianc::e wrap, fn_t* fn>
-auto custom_chain DISPATCH_FNSIG{
-  become dive<
-      wrap,
-      sequence<fn,
-               path<table_t_make(pair_t{tokc::DCOLON, advance2<chain<true>>}),
-                    empty>>>(DISPATCH_ARGS);
+template <medianc::e wrap, fn_t *fn> auto custom_chain DISPATCH_FNSIG {
+  become dive<wrap, sequence<fn, path<table_t_make(pair_t{
+                                          tokc::DCOLON, advance2<chain<true>>}),
+                                      empty>>>(DISPATCH_ARGS);
 };
 
 auto init_list DISPATCH_FNSIG {
@@ -444,17 +465,20 @@ auto result DISPATCH_FNSIG {
       DISPATCH_ARGS);
 }
 
-constexpr auto chain_1_table = table_t_make(
-    pair_t{tokc::ID, push_final});
+constexpr auto chain_1_table = table_t_make(pair_t{tokc::ID, push_final});
 
-namespace chain_aux{  
+auto template_init DISPATCH_FNSIG {
+  cbraces<template_arg, medianc::TEMPLATE_INSTATIATION>(DISPATCH_ARGS);
+}
+
+namespace chain_aux {
 constexpr auto fncall =
     pair_t{tokc::LPAREN, parens<expr, medianc::FUNCTION_CALL>};
 constexpr auto array_access =
     pair_t{tokc::LBRACE, braces<expr, medianc::ARRAY_ACCESS>};
-constexpr auto template_init = 
-    pair_t{tokc::LCBRACE, cbraces<comptime_arg, medianc::TEMPLATE_INSTATIATION>};
-}
+constexpr auto template_init = pair_t{tokc::LCBRACE, grammar::template_init};
+} // namespace chain_aux
+
 constexpr auto chain_2_table = table_t_make(
     chain_aux::fncall, chain_aux::array_access, chain_aux::template_init);
 
@@ -476,18 +500,19 @@ inline auto chain_mid DISPATCH_FNSIG {
   } while (true);
 }
 
-template <bool compound_ext> auto chain DISPATCH_FNSIG {
-  static auto impl = DISPATCH_LAM {
+template <bool compound_ext>
+auto chain(context_t &ctx, cursor_t &cursor) -> void {
+  static auto impl = [](context_t &ctx, cursor_t &cursor) -> void {
     if constexpr (compound_ext) {
-      path<table_t_make<chain_1_table, chain_2_table>()>(DISPATCH_ARGS);
+      path<table_t_make<chain_1_table, chain_2_table>()>(ctx, cursor);
       constexpr auto codes = table_t_get_codes(chain_2_table);
-      while (is<codes>(cursor)){
-        path<chain_2_table>(DISPATCH_ARGS);
+      while (is<codes>(cursor)) {
+        path<chain_2_table>(ctx, cursor);
       }
 
       if (!is<tokc::DCOLON>(cursor))
         return;
-      advance(DISPATCH_ARGS);
+      advance(ctx, cursor);
     }
     chain_mid(DISPATCH_ARGS);
   };
@@ -497,6 +522,29 @@ template <bool compound_ext> auto chain DISPATCH_FNSIG {
   } else {
     dive<medianc::CHAIN, impl>(DISPATCH_ARGS);
   }
+}
+auto access_chain DISPATCH_FNSIG {
+  static auto impl = [](context_t &ctx, cursor_t &cursor) -> void {
+    constexpr auto table =
+        table_t_make(pair_t{tokc::LCBRACE, template_arg_list});
+    do {
+      path<chain_1_table>(DISPATCH_ARGS);
+    AGAIN:
+      if (is<tokc::DCOLON>(cursor)) [[unlikely]] {
+        advance(DISPATCH_ARGS);
+      } else {
+        if (is<table_t_get_codes(table)>(cursor)) {
+          path<table>(DISPATCH_ARGS);
+          goto AGAIN;
+        } else {
+          break;
+        }
+      }
+    } while (true);
+  };
+
+  dive<medianc::CHAIN, impl>(DISPATCH_ARGS);
+  // we just access ids, so we need to be able to do templates
 }
 
 auto collection_alias_decl DISPATCH_FNSIG {
@@ -512,51 +560,66 @@ auto enum_elm DISPATCH_FNSIG {
   become expr(DISPATCH_ARGS);
 }
 
-auto comptime_arglist DISPATCH_FNSIG {
-  become cbraces<attribute_path<medianc::ARGUMENT,decl>, medianc::TEMPLATE_ARGUMENT_LIST>(DISPATCH_ARGS);
-}
+// auto comptime_arglist DISPATCH_FNSIG {
+//   become cbraces<attribute_path<medianc::ARGUMENT, template_arg_decl>,
+//                  medianc::TEMPLATE_ARGUMENT_LIST>(DISPATCH_ARGS);
+// }
 
-template<fn_t* elm, medianc::e med>
-auto aggregate_decl_pat DISPATCH_FNSIG{
+template <fn_t *elm, medianc::e med> auto aggregate_decl_pat DISPATCH_FNSIG {
   advance(DISPATCH_ARGS);
-  dive<med, DISPATCH_LAM{
+  dive < med, DISPATCH_LAM {
     if (is<tokc::LCBRACE>(cursor))
-      comptime_arglist(DISPATCH_ARGS);
-    parens<elm,medianc::BODY>(DISPATCH_ARGS);
-  }>(DISPATCH_ARGS);
+      template_arg_list(DISPATCH_ARGS);
+    parens<elm, medianc::BODY>(DISPATCH_ARGS);
+  }
+  > (DISPATCH_ARGS);
 }
 
-auto collection_fn DISPATCH_FNSIG {become  aggregate_decl_pat<attribute_path<medianc::ELEMENT,collection_alias_decl>, medianc::COLLECTION>(DISPATCH_ARGS);}
-auto record_fn     DISPATCH_FNSIG {become  aggregate_decl_pat<base, medianc::RECORD>(DISPATCH_ARGS);}
-auto union_fn      DISPATCH_FNSIG {become  aggregate_decl_pat<base, medianc::UNION>(DISPATCH_ARGS);}
-auto enum_fn       DISPATCH_FNSIG {become  aggregate_decl_pat<dive<medianc::ELEMENT,enum_elm>, medianc::ENUM>(DISPATCH_ARGS);}
-auto tup_fn        DISPATCH_FNSIG {return  sequence<consume<tokc::e::BUILTIN_DUCKLING>,parens<dive<medianc::ELEMENT,type>, medianc::TUPLE>>(DISPATCH_ARGS);}
+auto collection_fn DISPATCH_FNSIG {
+  become aggregate_decl_pat<
+      attribute_path<medianc::ELEMENT, collection_alias_decl>,
+      medianc::COLLECTION>(DISPATCH_ARGS);
+}
+auto record_fn DISPATCH_FNSIG {
+  become aggregate_decl_pat<base, medianc::RECORD>(DISPATCH_ARGS);
+}
+auto union_fn DISPATCH_FNSIG {
+  become aggregate_decl_pat<base, medianc::UNION>(DISPATCH_ARGS);
+}
+auto enum_fn DISPATCH_FNSIG {
+  become aggregate_decl_pat<dive<medianc::ELEMENT, enum_elm>, medianc::ENUM>(
+      DISPATCH_ARGS);
+}
+auto tup_fn DISPATCH_FNSIG {
+  return sequence<consume<tokc::e::BUILTIN_DUCKLING>,
+                  parens<dive<medianc::ELEMENT, type>, medianc::TUPLE>>(
+      DISPATCH_ARGS);
+}
 
 constexpr auto aggregate_table = table_t_make(
-    pair_t{tokc::BUILTIN_COLLECTION,collection_fn},
-    pair_t{tokc::BUILTIN_REC,record_fn},
-    pair_t{tokc::BUILTIN_UNION,union_fn},
-    pair_t{tokc::BUILTIN_ENUM,enum_fn});
+    pair_t{tokc::BUILTIN_COLLECTION, collection_fn},
+    pair_t{tokc::BUILTIN_REC, record_fn}, pair_t{tokc::BUILTIN_UNION, union_fn},
+    pair_t{tokc::BUILTIN_ENUM, enum_fn});
 
-constexpr auto integral_table =
-    table_t_make(pair_t{tokc::TYPE_INT,  push_final},
-                 pair_t{tokc::TYPE_UINT,  push_final},
-                 pair_t{tokc::TYPE_FLOAT,  push_final},
-                 pair_t{tokc::TYPE_BOOLEAN,  push_final});
+constexpr auto integral_table = table_t_make(
+    pair_t{tokc::TYPE_INT, push_final}, pair_t{tokc::TYPE_UINT, push_final},
+    pair_t{tokc::TYPE_FLOAT, push_final},
+    pair_t{tokc::TYPE_BOOLEAN, push_final});
 
 constexpr auto anon_type_table = table_t_make<
-  aggregate_table,
-  table_t_make(pair_t{tokc::BUILTIN_FN,  fnsig},
-               pair_t{tokc::BUILTIN_VECTOR, sequence<advance,symetrical<type,medianc::VECTOR>>})
->();
+    aggregate_table,
+    table_t_make(
+        pair_t{tokc::BUILTIN_FN, fnsig /* <false, true> */},
+        pair_t{tokc::BUILTIN_VECTOR,
+               sequence<advance, symetrical<type, medianc::VECTOR>>})>();
 
 // static constexpr auto type_prefix_table = table_t_make(
-//     pair_t{tokc::CARET, push_final}, 
+//     pair_t{tokc::CARET, push_final},
 //     pair_t{tokc::PERISPOMENI, push_final},
 //     pair_t{tokc::LBRACE, symetrical<expr>});
 static constexpr auto type_prefix_table = table_t_make(
     pair_t{tokc::PERISPOMENI, dive<medianc::PTR, advance2<type>>},
-    // pair_t{tokc::CARET, dive<medianc::REF, advance2<type>>} 
+    // pair_t{tokc::CARET, dive<medianc::REF, advance2<type>>}
     pair_t{tokc::LBRACE, symetrical<expr>} // todo //why did I comment this out
 );
 
@@ -568,13 +631,11 @@ constexpr auto type_table =
                               pair_t{tokc::BUILTIN_PTR, push_final<>},
                               pair_t{tokc::BUILTIN_VOID, push_final<>})>();
 
-
 auto get_index(podlist_t<node_t> &nodes) -> std::uint64_t {
   return nodes.size();
 }
 
-template<fn_t* fn>
-auto extend(std::uint64_t index,DISPATCH_ARGS_DECL){
+template <fn_t *fn> auto extend(std::uint64_t index, DISPATCH_ARGS_DECL) {
   fn(DISPATCH_ARGS);
   auto length = ctx.nodes.length() - index;
   ctx.nodes.at(index).as_raw_median().len_ = length;
@@ -582,9 +643,8 @@ auto extend(std::uint64_t index,DISPATCH_ARGS_DECL){
 
 auto type DISPATCH_FNSIG {
   static constexpr auto inner_type_table = [] consteval -> auto {
-      return table_t_make<type_table, type_prefix_table,
-                          table_t_make(
-                              pair_t{tokc::ID, chain<>})>();
+    return table_t_make<type_table, type_prefix_table,
+                        table_t_make(pair_t{tokc::ID, chain<>})>();
   }();
 
   auto impl = [](DISPATCH_ARGS_DECL) static -> void {
@@ -595,25 +655,24 @@ auto type DISPATCH_FNSIG {
 
     //     // } while (is<table_t_get_codes(type_prefix_table)>(cursor));
     //   }
-      // > (DISPATCH_ARGS);
+    // > (DISPATCH_ARGS);
     // }else{
-      
+
     // }
     path<inner_type_table, nullptr>(DISPATCH_ARGS);
   };
 
   // prefix
-  dive<medianc::TYPE,impl>(DISPATCH_ARGS);
-
+  dive<medianc::TYPE, impl>(DISPATCH_ARGS);
 }
 
 auto while_fn DISPATCH_FNSIG;
 auto for_fn DISPATCH_FNSIG;
 auto switch_fn DISPATCH_FNSIG;
 // auto alias_decl DISPATCH_FNSIG;
-template <bool list_type = false, fn_t *intro = cbraces<type, medianc::COMPOUND_LITERAL_TYPE>>
-auto complit_fn DISPATCH_FNSIG ;
-
+template <bool list_type = false,
+          fn_t *intro = cbraces<type, medianc::COMPOUND_LITERAL_TYPE>>
+auto complit_fn DISPATCH_FNSIG;
 
 namespace if_stmt {
 // if I do not use cbraces I can't know when the next set of parens will be a
@@ -630,50 +689,53 @@ namespace if_stmt {
 // but because everything is stored in a array it migth be a bit more complex
 // I can do what I do on the lexer
 // or when lexing I can keep a table with the pair token's indexes
-const auto &ctrl_expr = parens_wrapper<end_with_scolon<expr>, medianc::CTRL_EXPR>;
+const auto &ctrl_expr =
+    parens_wrapper<end_with_scolon<expr>, medianc::CTRL_EXPR>;
 const auto &body = parens<base, medianc::BODY>;
 const auto &if_branch = sequence<ctrl_expr, body>;
 
-
 auto if_else_path DISPATCH_FNSIG;
-constexpr auto elif_pair = pair_t{tokc::LPAREN, sequence<dive<medianc::ELIF, if_branch>, if_else_path>};
-constexpr auto el_pair =   pair_t{tokc::LCBRACE, dive<medianc::ELSE, body>};
+constexpr auto elif_pair = pair_t{
+    tokc::LPAREN, sequence<dive<medianc::ELIF, if_branch>, if_else_path>};
+constexpr auto el_pair = pair_t{tokc::LCBRACE, dive<medianc::ELSE, body>};
 constexpr auto set = table_t_make(elif_pair, el_pair);
 auto if_else_path DISPATCH_FNSIG {
-  if(!is<tokc::LPAREN>(cursor))
+  if (!is<tokc::LPAREN>(cursor))
     return;
   const auto cursor_index = ctx.toks.to_index(cursor);
   const auto pair_index = ctx.smap.at(cursor_index);
   const auto pair_cursor = cursor_t(&ctx.toks.toks.at(pair_index)).advance();
-  if(pair_cursor->isa(tokc::LPAREN))
+  if (pair_cursor->isa(tokc::LPAREN))
     sequence<dive<medianc::ELIF, if_branch>, if_else_path>(DISPATCH_ARGS);
   else
     dive<medianc::ELSE, body>(DISPATCH_ARGS);
 }
 
 auto fn DISPATCH_FNSIG {
-  become dive<medianc::IF_EXPR,DISPATCH_LAM{
-  advance(DISPATCH_ARGS);
-  dive<medianc::IF,if_branch>(DISPATCH_ARGS);
+  become dive < medianc::IF_EXPR, DISPATCH_LAM {
+    advance(DISPATCH_ARGS);
+    dive<medianc::IF, if_branch>(DISPATCH_ARGS);
 
-  if (!is<tokc::LPAREN>(cursor))
-    return;
+    if (!is<tokc::LPAREN>(cursor))
+      return;
 
-  if_else_path(DISPATCH_ARGS);
-  }>(DISPATCH_ARGS);
+    if_else_path(DISPATCH_ARGS);
+  }
+  > (DISPATCH_ARGS);
 }
 } // namespace if_stmt
 
 static constexpr auto compound_lit_table = table_t_make(
-    pair_t{tokc::LCBRACE,       complit_fn},
-    pair_t{tokc::BUILTIN_FN,    complit_fn<true ,dive<medianc::TYPE, fnsig>>},
-    pair_t{tokc::BUILTIN_REC,   complit_fn<false,dive<medianc::TYPE, record_fn>>},
-    pair_t{tokc::BUILTIN_ENUM,  complit_fn<false,dive<medianc::TYPE, enum_fn>>},
-    pair_t{tokc::BUILTIN_UNION, complit_fn<false,dive<medianc::TYPE, union_fn>>});
+    pair_t{tokc::LCBRACE, complit_fn},
+    pair_t{tokc::BUILTIN_FN,
+           complit_fn<true, dive<medianc::TYPE, fnsig /* <true, false> */>>},
+    pair_t{tokc::BUILTIN_REC,
+           complit_fn<false, dive<medianc::TYPE, record_fn>>},
+    pair_t{tokc::BUILTIN_ENUM, complit_fn<false, dive<medianc::TYPE, enum_fn>>},
+    pair_t{tokc::BUILTIN_UNION,
+           complit_fn<false, dive<medianc::TYPE, union_fn>>});
 
-auto consume DISPATCH_FNSIG { 
-  become advance(DISPATCH_ARGS); 
-}
+auto consume DISPATCH_FNSIG { become advance(DISPATCH_ARGS); }
 
 constexpr auto operand_expr_table = table_t_make<
     compound_lit_table,
@@ -696,7 +758,8 @@ constexpr auto operand_expr_table = table_t_make<
                    pair_t{tokc::LCBRACE, cbraces_wrapper<end_with_scolon<type>,
                                                          medianc::SIZEOF>})>>},
         pair_t{tokc::BUILTIN_WHILE, while_fn}
-        // why is While here??? I guess for <expr> -> while(<some expr that uses
+        // why is While here??? I guess for <expr> -> while(<some expr that
+        // uses
         // @pipe>){} ...
         )>();
 
@@ -711,7 +774,6 @@ constexpr auto operator_expr_table =
 
 constexpr auto expr_table =
     table_t_make<operand_expr_table, operator_expr_table>();
-
 
 // if I droped generic types or generic expresions I could make something
 // but dropping generic types is not happening and dropping generic expresions
@@ -738,7 +800,7 @@ auto type_or_expr DISPATCH_FNSIG {
           // gona use it for when we use
           // the correct function to parse
           // it and hijack the real parse
-          //we might segfault without it :)
+          // we might segfault without it :)
           // tree
           ctx.nodes.push_back(node_t::make(cursor));
           break;
@@ -758,31 +820,32 @@ auto while_fn DISPATCH_FNSIG {
   become
       dive<medianc::WHILE,
            sequence<consume<tokc::BUILTIN_WHILE>,
-                    parens_wrapper<end_with_scolon<expr>, medianc::CTRL_EXPR>, loop_body>>(
-          DISPATCH_ARGS);
+                    parens_wrapper<end_with_scolon<expr>, medianc::CTRL_EXPR>,
+                    loop_body>>(DISPATCH_ARGS);
 }
 
 auto for_fn DISPATCH_FNSIG {
-  become
-      dive<medianc::FOR,
-           sequence<consume<tokc::BUILTIN_FOR>,
-                    parens_wrapper<sequence<end_with_scolon<decl>, end_with_scolon<expr>, end_with_scolon<expr>>,
-                                   medianc::CTRL_EXPR>,
-                    loop_body>>(DISPATCH_ARGS);
+  become dive<medianc::FOR,
+              sequence<consume<tokc::BUILTIN_FOR>,
+                       parens_wrapper<sequence<end_with_scolon<decl>,
+                                               end_with_scolon<expr>,
+                                               end_with_scolon<expr>>,
+                                      medianc::CTRL_EXPR>,
+                       loop_body>>(DISPATCH_ARGS);
 }
 
 auto switch_fn DISPATCH_FNSIG {
   static constexpr auto case_fn =
-      dive<medianc::CASE, sequence<consume<tokc::BUILTIN_CASE>,
-                          parens<expr,medianc::CTRL_EXPR>,
-                          parens<base>>>;
+      dive<medianc::CASE,
+           sequence<consume<tokc::BUILTIN_CASE>,
+                    parens<expr, medianc::CTRL_EXPR>, parens<base>>>;
   become dive<medianc::SWITCH,
               sequence<consume<tokc::BUILTIN_SWITCH>,
                        parens<expr, medianc::CTRL_EXPR>, parens<case_fn>>>(
       DISPATCH_ARGS);
 }
 
-// @TODO: there is a bug where if put a fn in the {...}
+// TODO: there is a bug where if put a fn in the {...}
 //  the result will not be correct because fns need a new locale_t and stmts_t
 //  and it is not yet excluded from the type table
 template <bool list_type, fn_t *intro> auto complit_fn DISPATCH_FNSIG {
@@ -803,32 +866,35 @@ template <bool list_type, fn_t *intro> auto complit_fn DISPATCH_FNSIG {
 
   dive<medianc::COMPOUND_LITERAL,
        sequence<fn, consume<tokc::DCOLON>,
-           path<table_t_make(pair_t{tokc::LCBRACE, cbraces<comptime_arg>}), empty>,
-           body_type,
-           path<table_t_make(pair_t{tokc::DCOLON, sequence<advance, chain<true>>}),empty>>>(DISPATCH_ARGS);
+                path<table_t_make(pair_t{tokc::LCBRACE, template_init}), empty>,
+                body_type,
+                path<table_t_make(
+                         pair_t{tokc::DCOLON, sequence<advance, chain<true>>}),
+                     empty>>>(DISPATCH_ARGS);
 }
 
 auto expr DISPATCH_FNSIG {
-  if (is<tokc::ENDSTMT>(cursor)) [[unlikely]]{
-    expected<"Expected an expresion">(ctx,cursor);
+  if (is<tokc::ENDSTMT>(cursor)) [[unlikely]] {
+    expected<"Expected an expresion">(ctx, cursor);
     std::cerr << "Can't have empty expresions" << '\n';
     std::abort();
     consume(DISPATCH_ARGS);
     return;
   }
-  // static constexpr auto operand_codes = table_t_get_codes(operand_expr_table);
+  // static constexpr auto operand_codes =
+  // table_t_get_codes(operand_expr_table);
   static constexpr auto operator_codes = table_t_get_codes(operator_expr_table);
 
   dive < medianc::EXPR, DISPATCH_LAM {
     do {
-      if(is<operator_codes>(cursor))
-        dive<medianc::OPERATOR,path<operator_expr_table>>(DISPATCH_ARGS);
-      else 
-        dive<medianc::OPERAND,path<operand_expr_table>>(DISPATCH_ARGS);
+      if (is<operator_codes>(cursor))
+        dive<medianc::OPERATOR, path<operator_expr_table>>(DISPATCH_ARGS);
+      else
+        dive<medianc::OPERAND, path<operand_expr_table>>(DISPATCH_ARGS);
     } while (LLVM_LIKELY(!is<tokc::ENDSTMT>(cursor)));
-  }> (DISPATCH_ARGS);
+  }
+  > (DISPATCH_ARGS);
 }
-
 
 auto var_decl DISPATCH_FNSIG {
   dive < medianc::DECL, DISPATCH_LAM {
@@ -840,10 +906,12 @@ auto var_decl DISPATCH_FNSIG {
       advance(DISPATCH_ARGS);
 
       if (is<tokc::ENDSTMT>(cursor)) [[unlikely]]
-        expected<"Declaration needs a type ,attribute list, and/or mutability specifier",
+        expected<"Declaration needs a type ,attribute list, and/or mutability "
+                 "specifier",
                  tokc::ENDSTMT>(DISPATCH_ARGS);
 
-      if (is<tokc::BUILTIN_MUTABLE, tokc::BUILTIN_IMMUTABLE>(cursor)) [[unlikely]] {
+      if (is<tokc::BUILTIN_MUTABLE, tokc::BUILTIN_IMMUTABLE>(cursor))
+          [[unlikely]] {
         ctx.nodes.push_back(node_t::make(cursor));
         advance(DISPATCH_ARGS);
       }
@@ -857,28 +925,37 @@ auto var_decl DISPATCH_FNSIG {
       return false;
     }();
 
-    constexpr auto& val_fn = dive<medianc::VALUE, expr>;
+    constexpr auto &val_fn = dive<medianc::VALUE, expr>;
     if (is<tokc::ASIGN>(cursor)) {
       advance(DISPATCH_ARGS);
       val_fn(DISPATCH_ARGS);
     } else if (must_infer_type) {
       advance(DISPATCH_ARGS);
       if (is<tokc::ENDSTMT>(cursor)) [[unlikely]]
-        expected<"Type can't be infered without a value", tokc::ENDSTMT>(DISPATCH_ARGS);
+        expected<"Type can't be infered without a value", tokc::ENDSTMT>(
+            DISPATCH_ARGS);
       val_fn(DISPATCH_ARGS);
     }
 
     expect<tokc::ENDSTMT>(DISPATCH_ARGS);
-  }> (DISPATCH_ARGS);
+  }
+  > (DISPATCH_ARGS);
 }
 
 auto type_decl DISPATCH_FNSIG {
+  // dive<medianc::TYPE_DECL,
+  //      sequence<push_final, advance<2>,
+  //               path<table_t_make(pair_t{tokc::ASIGN,
+  //                                        sequence<consume<tokc::ASIGN>,
+  //                                        type>}
+  //                                      ),
+  //                    empty>,
+  //               expect<tokc::ENDSTMT>>>(DISPATCH_ARGS);
+
   dive<medianc::TYPE_DECL,
        sequence<push_final, advance<2>,
-                path<table_t_make(pair_t{tokc::ASIGN,
-                                         sequence<consume<tokc::ASIGN>, type>}),
-                     empty>,
-                expect<tokc::ENDSTMT>>>(DISPATCH_ARGS);
+                path<table_t_make(pair_t{tokc::ENDSTMT, empty}), type>>>(
+      DISPATCH_ARGS);
 }
 auto scope_decl DISPATCH_FNSIG {
   dive < medianc::SCOPE_DECL, DISPATCH_LAM {
@@ -907,24 +984,33 @@ auto unwrap_decl DISPATCH_FNSIG {
       DISPATCH_ARGS);
 }
 
-// auto fn_decl DISPATCH_FNSIG {
-//   dive < medianc::FN_DECL, DISPATCH_LAM {
-//     push_final(DISPATCH_ARGS);
-//     cursor.advance(1);
+auto fn_decl DISPATCH_FNSIG {
+  dive < medianc::FN_DECL, DISPATCH_LAM {
+    push_final(DISPATCH_ARGS);
+    sequence<advance, fnsig, consume<tokc::ASIGN>, dive<medianc::BODY, expr>>(
+        ctx, cursor);
 
-//     sequence<fnsig, consume<tokc::ASIGN>, dive<medianc::BODY,expr>>(ctx, cursor);
+    expect<tokc::ENDSTMT>(DISPATCH_ARGS);
+  }
+  > (DISPATCH_ARGS);
+}
 
-//     expect<tokc::ENDSTMT>(DISPATCH_ARGS);
-//   }
-//   > (DISPATCH_ARGS);
-// }
+auto template_arg_decl DISPATCH_FNSIG {
+  expect<tokc::ID>(DISPATCH_ARGS);
+  auto cursor2 = cursor;
+  ++cursor2;
+  expect<tokc::COLON>(ctx, cursor2);
+  constexpr auto table = table_t_make(pair_t{tokc::BUILTIN_TYPE, type_decl});
+  path<table, var_decl, 2>(DISPATCH_ARGS);
+}
 
 auto decl DISPATCH_FNSIG {
-  static const auto &a =
-      path<table_t_make(pair_t{tokc::BUILTIN_SCOPE, scope_decl},
-                        pair_t{tokc::BUILTIN_TYPE, type_decl}
-                        /* ,pair_t{tokc::BUILTIN_FN,fn_decl} */), // change this to the fn_decl function
-           var_decl, 2>;
+  static const auto &a = path<
+      table_t_make(
+          pair_t{tokc::BUILTIN_SCOPE, scope_decl},
+          pair_t{tokc::BUILTIN_TYPE,type_decl} ,
+          pair_t{tokc::BUILTIN_FN,fn_decl}),
+      var_decl, 2>;
   become a(DISPATCH_ARGS);
 }
 
@@ -947,31 +1033,29 @@ constexpr auto base_misc =
 constexpr auto base_table =
     table_t_make<base_decls, base_return, base_loop, base_misc>();
 
-template<auto table = base_table>
-auto base_call DISPATCH_FNSIG{ become  path<table, expr>(DISPATCH_ARGS);}
-
-auto base DISPATCH_FNSIG {
-  become attribute_path<
-      medianc::STMT,
-      base_call<table_t_make<base_decls, base_loop>()>, 
-      base_call>(DISPATCH_ARGS);
+template <auto table = base_table> auto base_call DISPATCH_FNSIG {
+  become path<table, expr>(DISPATCH_ARGS);
 }
 
-__attribute__((visibility("default")))
-auto entry(
-  const token_buffer_t &toks,
-  const std::map<size_t, size_t>& smap,
-  cursor_t cursor, const cursor_t end) -> parser_out {
+auto base DISPATCH_FNSIG {
+  become attribute_path<medianc::STMT,
+                        base_call<table_t_make<base_decls, base_loop>()>,
+                        base_call>(DISPATCH_ARGS);
+}
 
-  auto nodes = podlist_t<node_t>::create(64);
+__attribute__((visibility("default"))) auto
+entry(const token_buffer_t &toks, const std::map<size_t, size_t> &smap,
+      cursor_t cursor, const cursor_t end) -> parser_out {
+
+  auto nodes = podlist_t<node_t>::create(32);
   auto ctx = context_t{toks, smap, nodes};
   symetrical<base, medianc::FILE>(ctx, cursor);
   nodes.shrink_to_fit();
   return nodes;
 }
 
-inline auto traverse_impl(const token_buffer_t &toks, auto &cursor,
-                   auto end, std::int32_t depth) -> void {
+inline auto traverse_impl(const token_buffer_t &toks, auto &cursor, auto end,
+                          std::int32_t depth) -> void {
   constexpr const auto depth_mult = 3;
 
 #define space_str std::string(depth *depth_mult, ' ')
@@ -981,19 +1065,26 @@ inline auto traverse_impl(const token_buffer_t &toks, auto &cursor,
     std::visit(overloaded{[&](node_t::final_t &val) {
                             {
                               print << "Final: " << token_code_str(val->type_)
-                                    << " \'" << toks.str(val) << "\'" /*<< " pos: {" << toks.row(val) << ", " << toks.col(val)<< "}" */ << '\n';
+                                    << " \'" << toks.str(val)
+                                    << "\'" /*<< " pos: {" << toks.row(val) <<
+                                               ", " << toks.col(val)<< "}" */
+                                    << '\n';
                             }
                             cursor.advance();
                           },
                           [&](node_t::median_t &val) {
                             {
                               print << "Median: " << medianc::str(val.type_)
-                                    << " length: " << val.len_ /* << " pos: "
-                              << " {" << toks.row(val.first) << ", "<< toks.col(val.first) << "}..."
-                              << "{" << toks.row(val.last) << ", "<< toks.col(val.last) << "}" */ <<  "\n";
+                                    << " length: "
+                                    << val.len_ /* << " pos: "
+               << " {" << toks.row(val.first) << ", "<< toks.col(val.first) <<
+               "}..."
+               << "{" << toks.row(val.last) << ", "<< toks.col(val.last) << "}"
+             */ << "\n";
                             }
                             cursor.advance();
-                            traverse_impl(toks, cursor, cursor + val.len_,depth + 1);
+                            traverse_impl(toks, cursor, cursor + val.len_,
+                                          depth + 1);
                           },
                           [&](node_t::err_t &val) {
                             {
@@ -1007,10 +1098,11 @@ inline auto traverse_impl(const token_buffer_t &toks, auto &cursor,
 #undef print
 }
 
-//Needs to be remade for now it only prints
+// Needs to be remade for now it only prints
 
-__attribute__((visibility("default")))
-auto traverse(const token_buffer_t &buf, podlist_t<node_t> &buffer) -> void {
+__attribute__((visibility("default"))) auto traverse(const token_buffer_t &buf,
+                                                     podlist_t<node_t> &buffer)
+    -> void {
   auto cursor = buffer.begin();
   return traverse_impl(buf, cursor, buffer.end(), 0);
 }
@@ -1018,4 +1110,4 @@ auto traverse(const token_buffer_t &buf, podlist_t<node_t> &buffer) -> void {
 #undef DISPATCH_ARGS_DECL
 #undef DISPATCH_ARGS
 #undef DISPATCH_FNSIG
-} // namespace parser
+} // namespace grammar

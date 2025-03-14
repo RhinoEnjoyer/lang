@@ -17,6 +17,7 @@ enum e : e_type {
 #define TOKEN_PARALLEL_SEQUENCE(spelling, code, sgroup_code) code, sgroup_code,
 #define TOKEN_BUILTIN_KEYWORD(spelling, code) code,
 #include "./token.def"
+  any,
   last,
 };
 

@@ -17,51 +17,45 @@
  *  made for PODs
  *  manualy allocated
     manualy deallocated */
-template <typename T>
-struct podlist_t {
-  using len_t = std::uint64_t;
-  T* begin_;
-  len_t len_;  // maybe use pointers? it is the same thing
-  len_t cap_;  // maybe use pointers? it is the same thing
+template <typename T> struct podlist_t {
+  using len_t = std::uint32_t;
+  T *begin_;
+  len_t len_;
+  len_t cap_;
 
-  podlist_t(T* begin, len_t len, len_t cap)
+  podlist_t(T *begin, len_t len, len_t cap)
       : begin_(begin), len_(len), cap_(cap) {}
   podlist_t() : begin_(nullptr), len_(0), cap_(0) {}
 
   constexpr static podlist_t create(const len_t cap) {
-    return podlist_t((T*)std::malloc(cap * sizeof(T)), 0, cap);
+    return podlist_t((T *)std::aligned_alloc(alignof(T), cap * sizeof(T)), 0, cap);
     // std::cout << __PRETTY_FUNCTION__ << " " << cap << std::endl;
   }
 
-  auto empty() const -> bool {
-    return len_ == 0;
-  }
+  auto empty() const -> bool { return len_ == 0; }
 
-  template <const len_t cap = 0>
-  static podlist_t create() {
+  template <const len_t cap = 0> static podlist_t create() {
     if constexpr (cap == 0) {
       return podlist_t{nullptr, 0, 0};
     } else {
-      return podlist_t((T*)std::malloc(cap * sizeof(T)), 0, cap);
+      return podlist_t((T *)std::aligned_alloc(alignof(T),cap * sizeof(T)), 0, cap);
     }
   }
   constexpr static podlist_t make() { return podlist_t{nullptr, 0, 0}; }
 
-  template <typename... Args>
-  static podlist_t<T> make(Args&&... args) {
+  template <typename... Args> static podlist_t<T> make(Args &&...args) {
     constexpr len_t cap = sizeof...(Args);
     auto p = podlist_t<T>::create(cap);
     p.append(std::move(args)...);
     return std::move(p);
   }
 
-  template <typename... Args>
-  static podlist_t<T> make_from_opt(Args&... args) {
+  template <typename... Args> static podlist_t<T> make_from_opt(Args &...args) {
     constexpr len_t cap = sizeof...(Args) + 1;
     // auto p = podlist_t((T *)std::malloc(cap * sizeof(T)), 0, cap);
     auto p = podlist_t<T>::create<cap>();
     (
-        [&](std::optional<T>& v) {
+        [&](std::optional<T> &v) {
           if (v.has_value())
             p.push_back(std::move(v.value()));
         }(args),
@@ -69,8 +63,8 @@ struct podlist_t {
     return std::move(p);
   }
 
-  T& at(len_t index) { return begin_[index]; }
-  const T& at(len_t index) const { return begin_[index]; }
+  T &at(len_t index) { return begin_[index]; }
+  const T &at(len_t index) const { return begin_[index]; }
 
   void resize(const len_t newcap) {
     T *const re = (T *)realloc(begin_, newcap * sizeof(T));
@@ -87,7 +81,7 @@ struct podlist_t {
     }
   }
 
-  void copy() {
+  podlist_t<T> copy() {
     if (len_ == 0)
       return podlist_t<T>();
 
@@ -96,7 +90,7 @@ struct podlist_t {
     return std::move(p);
   }
 
-  podlist_t(podlist_t&& other) noexcept {
+  podlist_t(podlist_t &&other) noexcept {
     this->begin_ = other.begin_;
     this->len_ = other.len_;
     this->cap_ = other.cap_;
@@ -106,9 +100,9 @@ struct podlist_t {
     // other.cap_ = 0;
   }
   // Move assignment operator
-  podlist_t& operator=(podlist_t&& other) noexcept {
+  podlist_t &operator=(podlist_t &&other) noexcept {
     if (__builtin_expect((bool)(this != &other), false)) {
-      this->release();  // Free the current resources
+      this->release(); // Free the current resources
       begin_ = other.begin_;
       len_ = other.len_;
       cap_ = other.cap_;
@@ -121,22 +115,28 @@ struct podlist_t {
   }
 
   // Delete copy constructor and copy assignment operator
-  podlist_t(const podlist_t&) = delete;
-  podlist_t& operator=(const podlist_t&) = delete;
+  podlist_t(const podlist_t &) = delete;
+  podlist_t &operator=(const podlist_t &) = delete;
 
   void shrink_to_fit() { resize(len_); }
-  auto size() { return len_; }
-  auto size_in_bytes() { return len_ * sizeof(T); }
-  auto length() { return len_; }
-  auto cap() { return cap_; }
-  auto cap_in_bytes() { return cap_ * sizeof(T); }
-  auto data() { return begin_; }
+  auto size() const { return len_; }
+  auto size_in_bytes() const { return len_ * sizeof(T); }
+  auto length() const { return len_; }
+  auto cap() const { return cap_; }
+  auto cap_in_bytes() const { return cap_ * sizeof(T); }
 
-  auto& back() { return *(end() - 1); }
-  auto& front() { return *(begin()); }
+  auto data() { return begin_; }
+  const auto data() const { return begin_; }
+
+  auto &back() { return *(end() - 1); }
+  const auto &back() const { return *(end() - 1); }
+
+  auto &front() { return *(begin()); }
+  const auto &front() const { return *(begin()); }
+
 #define PODLIST_GROWTH_FACTOR ((cap_ > 50000) ? 2 : 30.0)
   // #define PODLIST_GROWTH_FACTOR 1.1
-  void push_back(const T& val) {
+  void push_back(const T &val) {
     if (len_ == cap_) [[unlikely]]
       resize(cap_ * PODLIST_GROWTH_FACTOR + 1);
     memcpy(begin_ + len_, &val, sizeof(T));
@@ -144,15 +144,14 @@ struct podlist_t {
 
     ++len_;
   }
-  void push_back(T&& val) {
+  void push_back(T &&val) {
     if (len_ == cap_) [[unlikely]]
       resize(cap_ * PODLIST_GROWTH_FACTOR + 1);
     memcpy(begin_ + len_, &val, sizeof(T));
     ++len_;
   }
 
-  template <typename... Args>
-  void append(Args&&... args) {
+  template <typename... Args> void append(Args &&...args) {
     constexpr auto arg_len = sizeof...(Args);
 
     if (__builtin_expect((bool)(len_ + arg_len >= cap_), false))
@@ -162,8 +161,7 @@ struct podlist_t {
     memcpy(begin_ + len_, a.begin(), sizeof(T) * arg_len);
     len_ += a.size();
   }
-  template <typename... Args>
-  void append(Args&... args) {
+  template <typename... Args> void append(Args &...args) {
     constexpr auto arg_len = sizeof...(Args);
 
     if (__builtin_expect((bool)(len_ + arg_len >= cap_), false))
@@ -183,21 +181,21 @@ struct podlist_t {
     len_ += span.size();
   }
 
-  void insert(std::uint64_t index, std::span<T> span){
-    if(index >= cap_)
+  void insert(std::uint64_t index, std::span<T> span) {
+    if (index >= cap_)
       append(span);
 
     const auto leni = span.size();
     const auto lenv = len_;
     const auto newcap = lenv + leni;
     const auto movelen = cap_ - index;
-    if(newcap > cap_)
-      this->resize(lenv + leni + lenv*1.2);
+    if (newcap > cap_)
+      this->resize(lenv + leni + lenv * 1.2);
     // const auto endi = cap_ - 1;
     const auto oldmovei = cap_ - movelen;
 
     std::memmove(begin_ + index, begin_ + oldmovei, sizeof(T) * (movelen));
-    std::memcpy(begin_ + index, span.data(), sizeof(T)*leni);
+    std::memcpy(begin_ + index, span.data(), sizeof(T) * leni);
   }
 
   void regress(const len_t rlen) {
@@ -207,24 +205,24 @@ struct podlist_t {
   }
   void pop_back() { regress(1); }
 
-  template <typename O, bool is_const>
-  struct podlist_iterator_t {
+  template <typename O, bool is_const> struct podlist_iterator_t {
     // using iterator_category = std::contiguous_iterator_tag;
     // using difference_type = std::ptrdiff_t;
     // using value_type = T;
     // using pointer = typename std::conditional<is_const, const T*, T*>::type;
-    // using reference = typename std::conditional<is_const, const T&, T&>::type;
+    // using reference = typename std::conditional<is_const, const T&,
+    // T&>::type;
     using iterator_category = std::contiguous_iterator_tag;
     using difference_type = std::ptrdiff_t;
     using value_type = T;
-    using pointer = typename std::conditional<is_const, const T*, T*>::type;
-    using reference = typename std::conditional<is_const, const T&, T&>::type;
+    using pointer = typename std::conditional<is_const, const T *, T *>::type;
+    using reference = typename std::conditional<is_const, const T &, T &>::type;
 
     explicit podlist_iterator_t() : ptr_(nullptr) {}
     explicit podlist_iterator_t(pointer ptr) : ptr_(ptr) {}
 
     template <bool other_is_const>
-    podlist_iterator_t(const podlist_iterator_t<O, other_is_const>& other)
+    podlist_iterator_t(const podlist_iterator_t<O, other_is_const> &other)
         : ptr_(other.ptr_) {}
     // template <bool ic0, bool ic1>
     // podlist_iterator_t<ic0>(podlist_iterator_t<ic1> ptr)
@@ -304,14 +302,16 @@ struct podlist_t {
                            const podlist_iterator_t &b) {
       return a.ptr_ >= b.ptr_;
     }
-  
+
     pointer base() const { return ptr_; }
 
-    inline podlist_iterator_t& advance(len_t off = 1){
+    inline podlist_iterator_t &advance(len_t off = 1) {
       ptr_ += off;
       return *this;
     }
-    private : pointer ptr_;
+
+  private:
+    pointer ptr_;
   };
 
   template <bool is_const = false> struct span {
@@ -355,9 +355,9 @@ struct podlist_t {
     std::ptrdiff_t size() const { return end_ - begin_; }
   };
 
-    // Define types for both const and non-const iterators
-    using iterator = podlist_iterator_t<T,false>;
-  using const_iterator = podlist_iterator_t<T,true>;
+  // Define types for both const and non-const iterators
+  using iterator = podlist_iterator_t<T, false>;
+  using const_iterator = podlist_iterator_t<T, true>;
 
   using it = iterator;
   using c_it = const_iterator;
@@ -372,17 +372,18 @@ struct podlist_t {
   const_iterator cbegin() const { return const_iterator(begin_); }
   const_iterator cend() const { return const_iterator(begin_ + len_); }
 
-  template<bool is_const = false>
-  auto view() const { return span<is_const>{begin(), end()}; }
+  template <bool is_const = false> auto view() const {
+    return span<is_const>{begin(), end()};
+  }
 
   template <bool cit>
-  auto it2index(podlist_iterator_t<T,cit> it) const -> std::uint64_t {
+  auto it2index(podlist_iterator_t<T, cit> it) const -> std::uint64_t {
     return it.base() - begin_;
   }
   template <bool is_const, typename... Args>
-  void insert(podlist_iterator_t<T, is_const> it, Args&... args) {
+  void insert(podlist_iterator_t<T, is_const> it, Args &...args) {
     constexpr auto arg_len = sizeof...(Args);
     auto index = it2index(it);
-    insert(index,args...);
+    insert(index, args...);
   }
 };
