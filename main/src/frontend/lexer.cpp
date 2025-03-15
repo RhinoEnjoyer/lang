@@ -1,7 +1,13 @@
 #include "../become.hpp"
 #include "./lexer.hpp"
 #include <array>
+#include <iostream>
 #include <print>
+
+
+//for compatability reasons
+#define LLVM_LIKELY(EXPR) __builtin_expect((bool)(EXPR), true)
+#define LLVM_UNLIKELY(EXPR) __builtin_expect((bool)(EXPR), false)
 
 // make the lexer create separate tables for
 //  each symbol that starts with the same char
@@ -207,15 +213,15 @@ auto next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN;
 
 [[clang::noinline]]
 auto err(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
-  llvm::errs() << "Line: " << lexer.line_ << '\n';
-  llvm::errs() << "Error: Unexpected char \' " << src[pos] << " \' at index "
+  std::cerr << "Line: " << lexer.line_ << '\n';
+  std::cerr << "Error: Unexpected char \' " << src[pos] << " \' at index "
                << pos << '\n';
   std::exit(EXIT_FAILURE);
 }
 
 [[clang::noinline, clang::preserve_all]]
 auto err(const std::string_view s, DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
-  llvm::errs() << "Error: " << s << "\n\tPos:" << pos << '\n';
+  std::cerr << "Error: " << s << "\n\tPos:" << pos << '\n';
 
   std::exit(EXIT_FAILURE);
 }
@@ -591,9 +597,10 @@ constexpr auto dispatch_table = [] consteval {
 __attribute__((visibility("default"))) auto entry(const src_buffer_t *src)
     -> std::tuple<token_buffer_t, std::map<size_t, size_t>> {
   lexer_t lexer;
-  lexer.buffer_.toks = podlist_t<token_t>::create(64);
-  lexer.buffer_.locs = podlist_t<srcloc_t>::create(64 * 4);
-  lexer.openstack_ = podlist_t<std::pair<tokc::e, size_t>>::create(64);
+
+  lexer.buffer_.toks = podlist_t<token_t>::create(64 * 10);
+  lexer.buffer_.locs = podlist_t<srcloc_t>::create(64 * 10);
+  lexer.openstack_   = podlist_t<std::pair<tokc::e, size_t>>::create(64 * 10);
   lexer.symetrical_index_map = {};
   lexer.buffer_.src = src;
 
@@ -607,7 +614,7 @@ __attribute__((visibility("default"))) auto entry(const src_buffer_t *src)
   lexer.push(tokc::e::ENDGROUP, 0, 0);
 
   if (lexer.openstack_.size() > 0) {
-    llvm::errs() << "Failed to close a symetrical" << '\n';
+    std::cerr << "Failed to close a symetrical" << '\n';
     std::exit(EXIT_FAILURE);
   }
 

@@ -53,15 +53,15 @@ struct token_buffer_t {
   auto len(vec<token_t>::c_it it) const { return locs.at(to_index(it)).length_; }
   auto row(vec<token_t>::c_it it) const { return locs.at(to_index(it)).line_; }
   auto col(vec<token_t>::c_it it) const {
-    const char *block = src->buffer().begin() + locs.at(to_index(it)).index_;
-    while (block != src->buffer().begin() && *block != '\n')
+    const char *block = src->buffer().begin().base() + locs.at(to_index(it)).index_;
+    while (block != src->buffer().begin().base() && *block != '\n')
       --block;
 
-    std::size_t prev_nl = block - src->buffer().begin();
+    std::size_t prev_nl = block - src->buffer().begin().base();
     return locs.at(to_index(it)).index_ - prev_nl;
   }
   std::string_view str(vec<token_t>::c_it it) const {
-    return std::string_view(src->buffer().begin() + locs.at(to_index(it)).index_,
+    return std::string_view(src->buffer().begin().base() + locs.at(to_index(it)).index_,
                             locs.at(to_index(it)).length_);
   }
 };

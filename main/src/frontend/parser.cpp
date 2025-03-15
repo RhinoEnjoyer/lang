@@ -891,7 +891,7 @@ auto expr DISPATCH_FNSIG {
         dive<medianc::OPERATOR, path<operator_expr_table>>(DISPATCH_ARGS);
       else
         dive<medianc::OPERAND, path<operand_expr_table>>(DISPATCH_ARGS);
-    } while (LLVM_LIKELY(!is<tokc::ENDSTMT>(cursor)));
+    } while (__builtin_expect((bool)(!is<tokc ::ENDSTMT>(cursor)), true));
   }
   > (DISPATCH_ARGS);
 }
@@ -1047,7 +1047,7 @@ __attribute__((visibility("default"))) auto
 entry(const token_buffer_t &toks, const std::map<size_t, size_t> &smap,
       cursor_t cursor, const cursor_t end) -> parser_out {
 
-  auto nodes = podlist_t<node_t>::create(32);
+  auto nodes = podlist_t<node_t>::create(64);
   auto ctx = context_t{toks, smap, nodes};
   symetrical<base, medianc::FILE>(ctx, cursor);
   nodes.shrink_to_fit();

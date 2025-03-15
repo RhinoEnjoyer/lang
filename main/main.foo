@@ -43,17 +43,10 @@
     );
   );
 
- main: @fn(argc: s32; argv: ~~u8)(s32) = (
-   pool := @as{u64}1000 -> pool_t::make(c::malloc(@pipe); @pipe);
-   allocator := pool::make_allocator();
-   val: ~s32 = allocator::alloc();
- );
-
-
-
-
-
-
-
+main: @fn(argc: s32; argv: ~~u8)(s32) = (
+  pool := @as{u64}1000 -> pool_t::make(c::malloc(@pipe); @pipe);
+  allocator := pool::make_allocator();
+  val: ~s32 = allocator::alloc();
+);
 
 

@@ -3,6 +3,7 @@
 #include "./podlist.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 // if one allocation doesn't fit
@@ -20,7 +21,9 @@ struct page_t {
     return {ptr, cap, ptr};
   }
 
-  void release() { delete[] static_cast<std::byte *>(data); }
+  void release() {
+    delete[] static_cast<std::byte *>(data);
+  }
 
   std::byte * begin_addr() const { return static_cast<std::byte *>(data); }
   std::byte * end_addr() const { return begin_addr() + cap - 1; }
@@ -43,17 +46,21 @@ struct page_t {
     }
     return nullptr;
   }
-  template <typename T> T *alloc() { return (T *)alloc(alignof(T), sizeof(T)); }
+  template <typename T> T *alloc() {
+    auto ptr =(T *)alloc(alignof(T), sizeof(T));
+    return ptr;
+  }
 };
 
 struct mempool_t {
   using page_list = podlist_t<page_t>;
   page_list pages;
+  std::vector<std::function<void()>> deconstructors;
 
   static mempool_t make() {
     auto list = page_list::create(10);
     list.push_back(page_t::make(4096));
-    return {std::move(list)};
+    return {std::move(list), {}};
   }
 
   size_t capacity_size() const {
@@ -71,6 +78,8 @@ struct mempool_t {
   size_t pool_size() const { return pages.size(); }
 
   void release() {
+    for (auto &d : deconstructors)
+      d();
     for (auto &page : pages)
       page.release();
     pages.release();
@@ -94,6 +103,8 @@ struct mempool_t {
     if constexpr (sizeof...(Args) > 0) {
       new (ptr) T(std::forward<Args>(args)...);    
     }
+
+    deconstructors.push_back([ptr]() { ptr->~T(); });
     return ptr;
   }
 };

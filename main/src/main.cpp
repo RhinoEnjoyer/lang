@@ -1,24 +1,16 @@
 #include <cstdlib>
 #include <iostream>
-#include <llvm/Support/VirtualFileSystem.h>
 #include <print>
 #include <utility>
+#include <filesystem>
 
 #include "./frontend/lexer.hpp"
 #include "./frontend/parser.hpp"
 #include "./frontend/semantics.hpp"
 #include "./source_buffer.hpp"
-#include "frontend/semantics_header.hpp"
 #include "mesure.hpp"
-#include "nicknames.hpp"
 #include "token.hpp"
-
-// #include <fmt/format.h>
-// #include <fmt/printf.h>
-
 #include <boost/program_options.hpp>
-#include <iostream>
-#include <string_view>
 
 int main(int argc, char *argv[]) {
   namespace prog_opts = boost::program_options;
@@ -40,28 +32,20 @@ int main(int argc, char *argv[]) {
 
   auto lam = [](const std::string filepath) {
     // sleep(10);
-    auto src = [&filepath] -> auto {
-      // auto file = std::filesystem::path{filepath};
-      // if(!std::filesystem::exists(file))
-      //   std::println(std::cerr, "\'{}\' doesn't exist", filepath);
-
-      auto fs = llvm::vfs::getRealFileSystem();
-      if (!fs->exists(filepath)) {
-        std::println(std::cerr, "[[ERROR]] File \"{}\" doens't exist",
-                     filepath);
-        std::exit(EXIT_FAILURE);
-      }
-      std::cout << "Loading File: " << filepath << '\n';
-      return [&] -> auto {
-        auto opt = src_buffer_t::make(fs.get(), filepath);
-        if (!opt) {
-          std::cout << "Error: " << opt.getError().message() << '\n';
-          std::abort();
+    auto src = [&filepath]() -> src_buffer_t {
+        namespace fs = std::filesystem;
+        if (!fs::exists(filepath)) {
+            std::cerr << "[[ERROR]] File \"" << filepath << "\" doesn't exist\n";
+            std::exit(EXIT_FAILURE);
         }
-        return std::move(opt.get());
-      }();
+        std::cout << "Loading File: " << filepath << '\n';
+        try {
+            return src_buffer_t::make(filepath);
+        } catch (const std::exception& ex) {
+            std::cerr << "Error: " << ex.what() << '\n';
+            std::abort();
+        }
     }();
-
     std::println("\t{}bytes\n", src.length());
 
     auto [lex_out, lex_time] = mesure([&] { return lexer::entry(&src); });
@@ -78,31 +62,29 @@ int main(int argc, char *argv[]) {
       return semantics::symbols::entry(symbol_pool, lex_output,
                                        *grammar_output.begin());
     });
-    auto &[locale, stmts] = symbols_result;
-
-    // semantics::resolve::entry(lex_output, locale, stmts);
+    auto &[file_locale, file_stmts] = symbols_result;
 
     // TEST
-    // {
-    //   std::println("Running the test");
-    //   auto lookup =
-    //       semantics::locale_t::expect_lookup<semantics::decl_s::scope_decl_t>(
-    //           locale, "core");
+    {
+      std::println("Running the test");
+      auto lookup =
+          semantics::locale_t::expect_lookup<semantics::decl_s::scope_decl_t>(
+              file_locale, "core");
 
-    //   if (!lookup.found)
-    //     throw std::runtime_error("Did not find core");
+      if (!lookup.found)
+        throw std::runtime_error("Did not find core");
 
-    //   auto &scope = lookup.symbol.get();
-    //   {
-    //     auto lookup =
-    //         semantics::locale_t::expect_lookup<semantics::decl_s::type_decl_t>(
-    //             scope.loc, "allocator_t");
-    //     if (!lookup.found)
-    //       std::abort();
-    //     std::println("core::allocator_t exits");
-    //   }
-    // }
-    // // TEST
+      auto &scope = lookup.symbol.get();
+      {
+        auto lookup =
+            semantics::locale_t::expect_lookup<semantics::decl_s::type_decl_t>(
+                scope.loc, "allocator_t");
+        if (!lookup.found)
+          std::abort();
+        std::println("core::allocator_t exits");
+      }
+    }
+    // TEST
 
     std::cout << "\n"
               << "Lexer: " << lex_time << "\n"
@@ -110,7 +92,8 @@ int main(int argc, char *argv[]) {
               << "Grammar: " << grammar_time << '\n'
               << "\tNode count: " << grammar_output.length()*sizeof(grammar::node_t) << '\n'
               << "Symbols: " << symbols_time << '\n'
-              << "\tPool size:" << symbol_pool.allocated_size() << "\n";
+              << "\tPool size:" << symbol_pool.allocated_size()
+              << "\n";
 
     symbol_pool.release();
     grammar_output.release();
