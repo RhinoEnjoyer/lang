@@ -46,8 +46,9 @@ struct page_t {
     }
     return nullptr;
   }
+
   template <typename T> T *alloc() {
-    auto ptr =(T *)alloc(alignof(T), sizeof(T));
+    auto ptr = (T *)alloc(alignof(T), sizeof(T));
     return ptr;
   }
 };
@@ -55,11 +56,11 @@ struct page_t {
 struct mempool_t {
   using page_list = podlist_t<page_t>;
   page_list pages;
-  std::vector<std::function<void()>> deconstructors;
+  std::vector<std::function<void()>> destructors;
 
   static mempool_t make() {
     auto list = page_list::create(10);
-    list.push_back(page_t::make(4096));
+    list.push_back(page_t::make(1024));
     return {std::move(list), {}};
   }
 
@@ -78,7 +79,7 @@ struct mempool_t {
   size_t pool_size() const { return pages.size(); }
 
   void release() {
-    for (auto &d : deconstructors)
+    for (auto &d : destructors)
       d();
     for (auto &page : pages)
       page.release();
@@ -91,20 +92,25 @@ struct mempool_t {
     pages.push_back(page_t::make(4096 * (pages.size() + 1)));
   }
 
-  template <typename T, typename ...Args> T *alloc(Args&&... args) {
-    page_t& page = top_page();
-    auto ptr = page.alloc<T>();
+  template <typename T, typename ...Args> 
+  T *alloc(Args&&... args) {
+      using U = std::remove_reference_t<T>;
+      
+      auto& page = top_page();
+      auto ptr = page.alloc<U>();
+  
+      if (!ptr) {
+          make_new_page();
+          return alloc<T>(std::forward<Args>(args)...);
+      }
 
-    if (!ptr) [[unlikely]] {
-      make_new_page();
-      return alloc<T>();
-    }
+      if constexpr (sizeof...(Args) > 0) {
+        new (ptr) U(std::forward<Args>(args)...);
+      } else {
+        new (ptr) U();
+      }
 
-    if constexpr (sizeof...(Args) > 0) {
-      new (ptr) T(std::forward<Args>(args)...);    
-    }
-
-    deconstructors.push_back([ptr]() { ptr->~T(); });
-    return ptr;
-  }
-};
+      destructors.push_back([ptr]() { ptr->~U(); });
+  
+      return ptr;
+  }};

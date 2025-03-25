@@ -3,8 +3,8 @@ EXEC_NAME='main'
 COMPLILER='clang++'
 
 # -s -fvisibility=hidden
-FLAGS='-std=c++23 -Wno-c++20-extensions -Wno-c++23-extensions -s -fvisibility=hidden -flto'
-OLVL='-Os'
+FLAGS='-std=c++23 -Wno-c++20-extensions -Wno-c++23-extensions -flto'
+OLVL='-O3'
 GLVL='-g0'
 LLVM_CONF='-lLLVM-19'
 # LLVM_CONF=`llvm-config --cxxflags --ldflags --libs --system-libs` #no exceptions no unwinding tables --std=C++17

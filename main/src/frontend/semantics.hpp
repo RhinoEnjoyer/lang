@@ -3,7 +3,9 @@
 #include "../nicknames.hpp"
 #include "../table.hpp"
 #include "./parser.hpp"
+#include "../mesure.hpp"
 
+#include <cstdint>
 #include <print>
 #include <stdexcept>
 #include <string_view>
@@ -189,6 +191,19 @@ struct tup_t {
 };
 VAR_MACRO(aggregate, rec_t, tup_t);
 
+
+struct fntype_t{
+  // sptr<template_args_t> tempalte_args;
+  list<sptr<type_t>> arg_types;
+  sptr<type_t> ret_type;
+};
+
+struct fntemplate_t{
+  sptr<locale_t> locale;
+  list<ssptr<decl_s::var_decl_t, decl_t>> args;
+  sptr<type_t> ret_type;
+};
+
 struct fnsig_t: public ask_t {
   sptr<locale_t> locale;
   sptr<template_args_t> template_args;
@@ -218,7 +233,6 @@ struct fn_t: public ask_t {
 };
 struct closure_t: public ask_t {
   sptr<fnsig_t> sig;
-
   closure_t(sptr<fnsig_t> s): ask_t(), sig(s)  {}
   sptr<locale_t> get_locale() override { return sig->get_locale(); }
   // sptr<stmts_t> body;
@@ -231,8 +245,8 @@ struct type_ref_t {
   sptr<type_t> ref;
 };
 
-using var = var<empty_t, type_ref_t, infered_t, primitive_t, aggregate_t,
-                callable_t, unresolved_t>;
+using var = var<empty_t, fntemplate_t, fntype_t, type_ref_t, infered_t,
+                primitive_t, aggregate_t, callable_t, unresolved_t>;
 } // namespace type_s
 struct type_t : public type_s::var {
   using type_s::var::variant;
@@ -585,14 +599,35 @@ struct locale_t {
   }
 };
 
-using resolve_callback_t = std::function<void()>;
+struct resolve_callback_t {
+  template <typename T> struct call_t {
+    ssptr<unresolved_t, T> ptr;
+    std::function<void(ssptr<unresolved_t, T>)> call;
+    void operator()() { call(ptr); }
+  };
+  var<call_t<type_t>, call_t<decl_t>> call;
+
+  template <typename T> auto get_ptr() -> sptr<T> & {
+    return std::get<call_t<T>>(call).ptr;
+  }
+  template <typename T> auto get_callback_obj() -> call_t<T> & {
+    return std::get<call_t<T>>(call);
+  }
+  void operator()() {
+    ovisit(call, [](auto &val) -> auto { return val(); });
+  }
+};
+
 struct context_t {
   const token_buffer_t &toks;
-  size_t cindex = 0;
-
+  size_t cindex;
   allocator_t &allocator;
 
-  list<resolve_callback_t> callbacks = {};
+  std::map<uintptr_t, resolve_callback_t>
+      callback_map = {};
+  template <typename T> void insert_callback(sptr<T> ptr, auto callback) {
+    callback_map.insert({(uintptr_t)ptr.get_ptr(), callback});
+  }
 
   size_t operator++() { return cindex++; }
   static std::size_t size;

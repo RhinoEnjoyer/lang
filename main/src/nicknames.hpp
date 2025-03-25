@@ -66,8 +66,10 @@ template <typename... T> using var = std::variant<T...>;
 template <typename T, typename BASE> struct ssptr {
   sptr<BASE> val;
   ssptr() : val(nullptr) {}
+  ssptr(sptr<BASE> &ptr) : val(ptr) {}
   ssptr(const sptr<BASE> &ptr) : val(ptr) {}
   ssptr(const sptr<BASE> &&ptr) : val(std::move(ptr)) {}
+  ssptr(sptr<BASE> &&ptr) : val(std::move(ptr)) {}
   
   T &get() { return std::get<T>(*val); }
   const T &get() const { return std::get<T>(*val); }
@@ -128,4 +130,17 @@ public:
 
 private:
   var_type variant_;
+};
+
+template <typename IT> struct bounded_cursor_t {
+  IT cursor;
+  const IT end;
+
+  bounded_cursor_t next() const { return {cursor + 1, end}; }
+  IT current() const { return cursor; }
+  template<size_t offset = 0>
+  bool within() const {
+    return (cursor + offset) >= end;
+  }
+  void advance() { cursor++; }
 };

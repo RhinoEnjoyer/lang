@@ -1,5 +1,8 @@
 #include "semantics.hpp"
 #include <boost/core/typeinfo.hpp>
+#include <cstdint>
+#include <iostream>
+#include <ostream>
 #include <stdexcept>
 #include <utility>
 #include <variant>
@@ -12,7 +15,6 @@ auto type_fn(context_t &ctx, sptr<locale_t> locale,
 }
 
 namespace symbols {
-
 auto consume_stmts_fn(context_t &ctx, sptr<locale_t> loc, sptr<stmts_t> stmts,
                       span_t span) -> void;
 auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
@@ -145,28 +147,66 @@ auto typeof_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
   return empty_t{};
 }
 
+auto fntemplate_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
+    -> type_t {
+  auto cursor = cursor_helper_t{med.children()};
+  const auto [args_med, ret_med] =
+      cursor.tuple_extract<medianc::FN_ARGS, medianc::FN_RET>();
+
+  list<ssptr<decl_s::var_decl_t, decl_t>> args;
+  sptr<type_t> ret_type;
+  auto locale = locale_t::make_child(ctx, loc);
+  {
+    auto cursor = cursor_helper_t{args_med->children()};
+    while (cursor.within()) {
+      auto type_med = cursor.extract<medianc::ARGUMENT>();
+      auto ptr = decl_spec_fn<var_decl_fn>(
+          ctx, locale, type_med.value().fchild().as_median());
+      args.push_back(ptr);
+    }
+  }
+
+  if (ret_med)
+    ret_type = type_fn(ctx, loc, ret_med->fchild().as_median());
+
+  return type_s::fntemplate_t{locale, args, ret_type};
+}
+
+auto fntype_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
+    -> type_t {
+  auto cursor = cursor_helper_t{med.children()};
+  const auto [args_med, ret_med] =
+      cursor.tuple_extract<medianc::FN_ARGS, medianc::FN_RET>();
+
+  list<sptr<type_t>> args;
+  sptr<type_t> ret_type;
+
+  if (args_med) {
+    auto cursor = cursor_helper_t{args_med->children()};
+    while (cursor.within()) {
+      auto type_med = cursor.extract<medianc::ARGUMENT>();
+      auto ptr = type_fn(ctx, loc, type_med.value().fchild().as_median());
+      args.push_back(ptr);
+    }
+  }
+
+  if (ret_med)
+    ret_type = type_fn(ctx, loc, ret_med->fchild().as_median());
+
+  return type_s::fntype_t{std::move(args), ret_type};
+}
 auto callable_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> type_t {
   auto cursor = cursor_helper_t{med.children()};
-
-  const auto [chain_med, state_med, template_med, args_med, ret_med] =
-      cursor.tuple_extract<medianc::DBRACES, medianc::FN_STATE_LIST,
+  const auto [state_med, template_med, args_med, ret_med] =
+      cursor.tuple_extract<medianc::FN_STATE_LIST,
                            medianc::TEMPLATE_ARGUMENT_LIST, medianc::FN_ARGS,
                            medianc::FN_RET>();
 
-  // if (chain_med) [[unlikely]] {
-  //   return type_s::inherit_decl_t{chain_med->fchild().as_median()};
-  // }
-
   bool is_closure = false;
-  if (state_med) [[unlikely]] {
-    if (state_med->len() == 0) {
-      is_closure = false;
-    } else {
+  if (state_med) [[unlikely]]
+    if (state_med->len() > 0)
       is_closure = true;
-      // do closure stuff
-    }
-  }
 
   auto locale = locale_t::make_child(ctx, loc);
   auto targs_list = ctx.make_sptr(type_s::template_args_t{});
@@ -193,17 +233,17 @@ auto callable_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
   auto sig = ctx.make_sptr(
       type_s::fnsig_t{locale, targs_list, std::move(args), ret_type});
 
-  if (is_closure)
-    return type_s::fn_t{sig};
+  if (!is_closure)
+    return type_t{type_s::callable_t{type_s::fn_t{sig}}};
   else
-    return type_s::closure_t{sig};
+    return type_t{type_s::callable_t{type_s::closure_t{sig}}};
 }
 
 auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
     -> sptr<type_t> {
   const auto node = type_med.children().begin()->node();
   auto ptr = ctx.make_sptr(type_t{});
-  auto val = (ovisit(
+  auto val = ovisit(
       node,
       [&ctx](const final_t &fin) -> type_t {
         switch (fin->type()) {
@@ -231,12 +271,17 @@ auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
         switch (type) {
         case medianc::CHAIN: {
           *ptr = unresolved_t{val};
-          ctx.callbacks.push_back(
+          ctx.insert_callback(
+              ptr,
               resolve::type_fn(ctx, loc, ssptr<unresolved_t, type_t>(ptr)));
+          // ctx.callbacks.push_back(
+          //     resolve::type_fn(ctx, loc, ssptr<unresolved_t, type_t>(ptr)));
           return unresolved_t{val};
         }
         case medianc::FN_SIG:
-          return callable_fn(ctx, loc, val);
+          return fntype_fn(ctx, loc, val);
+        case medianc::FN_TEMPLATE:
+          return fntemplate_fn(ctx, loc, val);
         case medianc::PTR:
           return indirection_fn<type_s::ptr_t>(ctx, loc, val);
         case medianc::TUPLE:
@@ -252,7 +297,7 @@ auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
           //                          std::string("unknown type (median_t)"));
         }
       },
-      [](const auto &val) -> type_t { std::unreachable(); }));
+      [](const auto &val) -> type_t { std::unreachable(); });
   *ptr = val;
   return ptr;
 }
@@ -321,20 +366,17 @@ auto fn_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
                 cursor_helper_t &cursor) -> void {
   auto [sig_med, body_med] =
       cursor.tuple_extract<medianc::FN_SIG, medianc::BODY>();
+  auto callable_type = callable_fn(ctx, loc, sig_med.value());
+  auto callable_type_ptr = ctx.make_sptr<type_t>(callable_type);
+  auto sig = ssptr<type_s::callable_t, type_t>{callable_type_ptr};
 
-  auto sig = ctx.make_sptr<type_t>(callable_fn(ctx, loc, sig_med.value()));
-  auto body =
-      expr_fn(ctx,
-              ovisit(
-                  *sig,
-                  [](type_s::callable_t &val) -> sptr<locale_t> {
-                    return ovisit(val, [](auto &val) -> sptr<locale_t> {
-                      return val.sig->locale;
-                    });
-                  },
-                  [](auto &val) -> sptr<locale_t> { std::unreachable(); }),
-              body_med.value().fchild().as_median());
-  *ptr = decl_s::fn_decl_t{sig, body};
+  auto body = expr_fn(
+      ctx,
+      ovisit(sig.get(),
+             [](auto &val) -> sptr<locale_t> { return val.get_locale(); }),
+      body_med.value().fchild().as_median());
+
+  *ptr = decl_s::fn_decl_t{sig.ptr(), body};
 }
 
 template <bool allow_init_val>
@@ -729,19 +771,23 @@ auto consume_stmts_fn(context_t &ctx, sptr<locale_t> loc, sptr<stmts_t> stmts,
 __attribute__((visibility("default"))) auto entry(allocator_t &allocator,
                                                   const token_buffer_t &toks,
                                                   grammar::node_t &root_node)
-    -> std::tuple<sptr<locale_t>, sptr<stmts_t>>{
+    -> std::tuple<sptr<locale_t>, sptr<stmts_t>> {
 
   auto ctx = context_t{toks, 0, allocator};
   auto locale = ctx.make_sptr(locale_t{});
   auto stmts = ctx.make_sptr(stmts_t{});
   auto span = root_node.as_median().children();
 
-  consume_stmts_fn(ctx, locale, stmts, span);
+  auto [res, time] = mesure([&] {
+    consume_stmts_fn(ctx, locale, stmts, span);
+    return 0;
+  });
 
-  for (auto &callback : ctx.callbacks) {
-    callback();
-  }
-
+  auto [res2, time2] = mesure([&] {
+    for (auto &callback : ctx.callback_map)
+      callback.second();
+    return 0;
+  });
   return std::tuple{locale, stmts};
 }
 
@@ -750,19 +796,73 @@ __attribute__((visibility("default"))) auto entry(allocator_t &allocator,
 namespace resolve {
 namespace resolve_callaback_s {
 
+auto type_ptr_asignment(context_t &ctx, sptr<locale_t> locale,
+                        ssptr<unresolved_t, type_t> ptr) -> sptr<type_t>;
+auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
+                  const span_t::iterator end) -> sptr<type_t>;
+
+auto get_locale(sptr<decl_t> ptr) -> sptr<locale_t> {
+  using ret = sptr<locale_t>;
+  return ovisit(
+      *ptr,
+      [](decl_s::type_decl_t &val) -> ret {
+        return ovisit(
+            *val.type,
+            [](type_s::aggregate_t &val) -> ret {
+              return ovisit(
+                  val, [](type_s::rec_t &val) -> ret { return val.loc; },
+                  [](auto &val) -> ret {
+                    std::println("can't get locale {}",
+                                 boost::core::demangled_name(typeid(val)));
+                    return nullptr;
+                  });
+            },
+            [](auto &val) -> ret {
+              std::println("can't get locale {}",
+                           boost::core::demangled_name(typeid(val)));
+              return nullptr;
+            });
+      },
+      [](decl_s::scope_decl_t &val) -> ret { return val.get_locale(); },
+      [](auto &val) -> ret {
+        std::println("can't get locale {}",
+                     boost::core::demangled_name(typeid(val)));
+        return nullptr;
+      });
+}
+auto get_locale(sptr<type_t> ptr) -> sptr<locale_t> {
+  using ret = sptr<locale_t>;
+  return ovisit(
+      *ptr, [](type_s::type_ref_t &val) -> ret { return get_locale(val.ref); },
+      [](type_s::aggregate_t &val) {
+        return ovisit(
+            val, [](type_s::rec_t &val) -> ret { return val.loc; },
+            [](auto &val) -> ret {
+              std::println("can't get locale {}",
+                           boost::core::demangled_name(typeid(val)));
+              return nullptr;
+            });
+      },
+      [](auto &val) -> ret {
+        std::println("can't get locale {}",
+                     boost::core::demangled_name(typeid(val)));
+        return nullptr;
+      });
+}
+
 auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
                   const span_t::iterator end) -> sptr<type_t> {
   auto val = it->node();
   return ovisit(
       val,
       [&](final_t &val) -> sptr<type_t> {
-        if (!val->isa(tokc::ID))
+        if (!val->isa(tokc::ID)) [[unlikely]]
           throw std::runtime_error(
               "Only IDs are supported in unresoved symbols");
 
         const auto str = ctx.toks.str(val);
         auto lookup = locale_t::ancestor_lookup(locale, str);
-        if (!lookup.found)
+        if (!lookup.found) [[unlikely]]
           throw std::runtime_error("Failed to find symbol " + std::string(str));
 
         return ovisit(
@@ -777,39 +877,46 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
                 return val.type;
               return ovisit(
                   *val.type,
-                  [&](type_s::callable_t &v) -> sptr<type_t> {
-                    if (it.next() >= end)
-                      return val.type;
-                    throw std::runtime_error("Callables can't be queried");
-                  },
-                  [&](type_s::primitive_t &v) -> sptr<type_t> {
-                    if (it.next() >= end)
-                      return val.type;
-                    throw std::runtime_error("Primitives can't be queried");
-                  },
-                  [&](type_s::aggregate_t &v) -> sptr<type_t> {
-                    if (it.next() >= end)
-                      return val.type;
-                    // throw std::runtime_error("Primitives can't be queried");
+                  [&](type_s::aggregate_t &val) -> sptr<type_t> {
                     return ovisit(
-                        v,
-                        [&](type_s::rec_t &v1) -> sptr<type_t> {
-                          return type_impl_fn(ctx, v1.loc, it.next(), end);
+                        val,
+                        [&](type_s::rec_t &val) -> sptr<type_t> {
+                          return type_impl_fn(ctx, val.loc, it.next(), end);
                         },
                         [&](auto &) -> sptr<type_t> {
-                          throw std::runtime_error("Not supported type");
+                          throw std::runtime_error(
+                              "Not supported aggregate type");
                         });
+                  },
+                  [&](unresolved_t &v) -> sptr<type_t> {
+                    // std::println("{}", ctx.toks.str(v.med.first()));
+                    auto lookup = locale_t::ancestor_lookup(
+                        locale, ctx.toks.str(v.med.first()));
+
+                    if (!lookup.found)
+                      throw std::runtime_error("Unable to find symbol");
+
+                    auto node =
+                        ctx.callback_map.find((uintptr_t)(val.type.get_ptr()));
+
+                    if (node == ctx.callback_map.end()) [[unlikely]]
+                      throw std::runtime_error("Unknown symbol");
+
+                    throw std::runtime_error(
+                        "Unresolved symbols are not supported at this moment");
                   },
                   [](auto &val) -> sptr<type_t> {
                     throw std::runtime_error(
                         "Type '" + boost::core::demangled_name(typeid(val)) +
-                        "' is not supported.");
+                        "' can't be queried.");
                   });
             },
             [&](auto &value) -> sptr<type_t> {
               throw std::runtime_error(
-                  "Type '" + boost::core::demangled_name(typeid(value)) +
-                  "' is not supported.");
+                  "Type '" + std::string(str) + " " +
+                  boost::core::demangled_name(typeid(value)) +
+                  "' is not supported as a valid symbol to extract a type "
+                  "from.");
             });
       },
       [&](median_t &val) -> sptr<type_t> {
@@ -817,16 +924,28 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
             "For now type resolution of unresoved symbols is not supported "
             "for median values");
       },
-      [&](auto &) -> sptr<type_t> { throw std::runtime_error("Unreachable"); });
-};
-} // namespace resolve_callaback_s
-auto type_fn(context_t &ctx, sptr<locale_t> locale,
-             ssptr<unresolved_t, type_t> ptr) -> resolve_callback_t {
-  return [&ctx, locale, ptr] {
+      [](auto &) -> sptr<type_t> { throw std::runtime_error("Unreachable"); });
+}
+
+auto type_ptr_asignment(context_t &ctx, sptr<locale_t> locale,
+                        ssptr<unresolved_t, type_t> ptr) -> sptr<type_t> {
+
+  if (rholds<unresolved_t>(*ptr.ptr())) [[likely]] {
     auto span = ptr.get().med.children();
     *(ptr.ptr()) = type_s::type_ref_t{resolve_callaback_s::type_impl_fn(
         ctx, locale, span.begin(), span.end())};
-  };
+  }
+  return ptr.ptr();
+}
+
+} // namespace resolve_callaback_s
+
+auto type_fn(context_t &ctx, sptr<locale_t> locale,
+             ssptr<unresolved_t, type_t> ptr) -> resolve_callback_t {
+  return resolve_callback_t{resolve_callback_t ::call_t<type_t>{
+      ptr, [&ctx, locale](ssptr<unresolved_t, type_t> ptr) -> void {
+        resolve_callaback_s::type_ptr_asignment(ctx, locale, ptr);
+      }}};
 }
 } // namespace resolve
 

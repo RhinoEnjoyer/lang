@@ -106,6 +106,40 @@ struct node_t {
         auto operator>=(const iterator &other) const -> bool {
           return ptr >= other.ptr;
         }
+        auto operator+(int n) const -> iterator {
+          iterator temp = *this;
+          while (n-- > 0) {
+            temp.advance();
+          }
+          return temp;
+        }
+
+        auto operator-(int n) const -> iterator {
+          iterator temp = *this;
+          while (n-- > 0) {
+            --temp.ptr; // Move the raw pointer back
+          }
+          return temp;
+        }
+        auto operator-=(size_t n) -> iterator & {
+          while (n-- > 0) {
+            --ptr; // Move the raw pointer back
+          }
+          return *this;
+        }
+        auto operator+=(size_t n) -> iterator & {
+          while (n-- > 0) {
+            advance();
+          }
+          return *this;
+        }
+
+        auto operator-=(int n) -> iterator & {
+          while (n-- > 0) {
+            --ptr; // Move the raw pointer back
+          }
+          return *this;
+        }
       };
       auto subspan(size_t offset, size_t count) const -> span_t {
         if (offset + count > size())

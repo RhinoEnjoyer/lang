@@ -413,28 +413,50 @@ auto template_arg_list DISPATCH_FNSIG {
 }
 
 // template <bool enable_state = true, bool enable_template = true>
-auto access_chain DISPATCH_FNSIG ;
-auto fnsig DISPATCH_FNSIG {
+auto fnpath DISPATCH_FNSIG;
+auto access_chain DISPATCH_FNSIG;
+
+namespace function_types {
+template<bool is_sig>
+auto fnsig_template DISPATCH_FNSIG {
+  constexpr auto dive_type = (is_sig) ? medianc::FN_SIG : medianc::FN_TEMPLATE;
+  constexpr auto arg_fn = (is_sig) ? type : decl;
+  dive < dive_type, DISPATCH_LAM {
+    parens<dive<medianc::ARGUMENT, arg_fn>, medianc::FN_ARGS>(DISPATCH_ARGS);
+    if (is<tokc::LPAREN>(cursor)) [[likely]]
+      parens_wrapper<end_with_scolon<type>, medianc::FN_RET>(DISPATCH_ARGS);
+  }
+  > (DISPATCH_ARGS);
+}
+} // namespace function_types
+
+auto fnpath DISPATCH_FNSIG {
+  advance(DISPATCH_ARGS);
+  constexpr auto fnsig_template = function_types::fnsig_template<false>;
+  constexpr auto fnsig_sig = function_types::fnsig_template<true>;
+  constexpr auto table = table_t_make(pair_t{tokc::COLON, fnsig_template});
+  // 0 paren 1 ID 2 COLON
+  path<table, fnsig_sig, 2>(DISPATCH_ARGS);
+}
+
+auto fndecl_sig DISPATCH_FNSIG {
   dive < medianc::FN_SIG, DISPATCH_LAM {
     advance(DISPATCH_ARGS);
-    // Function state
-    // if constexpr (enable_state)
-
     if (is<tokc::LBRACE>(cursor))
       symetrical<expr, medianc::FN_STATE_LIST>(DISPATCH_ARGS);
 
     // Compile time arguments declaration
-    // if constexpr (enable_template)
     if (is<tokc::LCBRACE>(cursor))
       template_arg_list(DISPATCH_ARGS);
 
+    constexpr auto arg_fn = [] consteval { return decl; }();
     if (is<tokc::LPAREN>(cursor)) [[likely]] {
       // Runtime Arguments
       parens<attribute_path<medianc::ARGUMENT,
                             path<table_t_make(pair_t{
                                      tokc::BUILTIN_SELF,
                                      dive<medianc::SELF_ARG, push_final<>>}),
-                                 decl>>,
+                                 arg_fn>>,
              medianc::FN_ARGS>(DISPATCH_ARGS);
       if (is<tokc::LPAREN>(cursor)) [[likely]]
         // Return type
@@ -609,7 +631,7 @@ constexpr auto integral_table = table_t_make(
 constexpr auto anon_type_table = table_t_make<
     aggregate_table,
     table_t_make(
-        pair_t{tokc::BUILTIN_FN, fnsig /* <false, true> */},
+        pair_t{tokc::BUILTIN_FN, fnpath /* <false, true> */},
         pair_t{tokc::BUILTIN_VECTOR,
                sequence<advance, symetrical<type, medianc::VECTOR>>})>();
 
@@ -727,8 +749,9 @@ auto fn DISPATCH_FNSIG {
 
 static constexpr auto compound_lit_table = table_t_make(
     pair_t{tokc::LCBRACE, complit_fn},
-    pair_t{tokc::BUILTIN_FN,
-           complit_fn<true, dive<medianc::TYPE, fnsig /* <true, false> */>>},
+    pair_t{
+        tokc::BUILTIN_FN,
+        complit_fn<true, dive<medianc::TYPE, fndecl_sig /* <true, false> */>>},
     pair_t{tokc::BUILTIN_REC,
            complit_fn<false, dive<medianc::TYPE, record_fn>>},
     pair_t{tokc::BUILTIN_ENUM, complit_fn<false, dive<medianc::TYPE, enum_fn>>},
@@ -987,8 +1010,8 @@ auto unwrap_decl DISPATCH_FNSIG {
 auto fn_decl DISPATCH_FNSIG {
   dive < medianc::FN_DECL, DISPATCH_LAM {
     push_final(DISPATCH_ARGS);
-    sequence<advance, fnsig, consume<tokc::ASIGN>, dive<medianc::BODY, expr>>(
-        ctx, cursor);
+    sequence<advance, fndecl_sig, consume<tokc::ASIGN>,
+             dive<medianc::BODY, expr>>(ctx, cursor);
 
     expect<tokc::ENDSTMT>(DISPATCH_ARGS);
   }
@@ -1005,12 +1028,11 @@ auto template_arg_decl DISPATCH_FNSIG {
 }
 
 auto decl DISPATCH_FNSIG {
-  static const auto &a = path<
-      table_t_make(
-          pair_t{tokc::BUILTIN_SCOPE, scope_decl},
-          pair_t{tokc::BUILTIN_TYPE,type_decl} ,
-          pair_t{tokc::BUILTIN_FN,fn_decl}),
-      var_decl, 2>;
+  static const auto &a =
+      path<table_t_make(pair_t{tokc::BUILTIN_SCOPE, scope_decl},
+                        pair_t{tokc::BUILTIN_TYPE, type_decl},
+                        pair_t{tokc::BUILTIN_FN, fn_decl}),
+           var_decl, 2>;
   become a(DISPATCH_ARGS);
 }
 
