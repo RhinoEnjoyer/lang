@@ -796,63 +796,16 @@ __attribute__((visibility("default"))) auto entry(allocator_t &allocator,
 namespace resolve {
 namespace resolve_callaback_s {
 
-auto type_ptr_asignment(context_t &ctx, sptr<locale_t> locale,
-                        ssptr<unresolved_t, type_t> ptr) -> sptr<type_t>;
-auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
-                  const span_t::iterator end) -> sptr<type_t>;
-
-auto get_locale(sptr<decl_t> ptr) -> sptr<locale_t> {
-  using ret = sptr<locale_t>;
-  return ovisit(
-      *ptr,
-      [](decl_s::type_decl_t &val) -> ret {
-        return ovisit(
-            *val.type,
-            [](type_s::aggregate_t &val) -> ret {
-              return ovisit(
-                  val, [](type_s::rec_t &val) -> ret { return val.loc; },
-                  [](auto &val) -> ret {
-                    std::println("can't get locale {}",
-                                 boost::core::demangled_name(typeid(val)));
-                    return nullptr;
-                  });
-            },
-            [](auto &val) -> ret {
-              std::println("can't get locale {}",
-                           boost::core::demangled_name(typeid(val)));
-              return nullptr;
-            });
-      },
-      [](decl_s::scope_decl_t &val) -> ret { return val.get_locale(); },
-      [](auto &val) -> ret {
-        std::println("can't get locale {}",
-                     boost::core::demangled_name(typeid(val)));
-        return nullptr;
-      });
-}
-auto get_locale(sptr<type_t> ptr) -> sptr<locale_t> {
-  using ret = sptr<locale_t>;
-  return ovisit(
-      *ptr, [](type_s::type_ref_t &val) -> ret { return get_locale(val.ref); },
-      [](type_s::aggregate_t &val) {
-        return ovisit(
-            val, [](type_s::rec_t &val) -> ret { return val.loc; },
-            [](auto &val) -> ret {
-              std::println("can't get locale {}",
-                           boost::core::demangled_name(typeid(val)));
-              return nullptr;
-            });
-      },
-      [](auto &val) -> ret {
-        std::println("can't get locale {}",
-                     boost::core::demangled_name(typeid(val)));
-        return nullptr;
-      });
-}
-
+template <bool doancestor>
 auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
                   const span_t::iterator end) -> sptr<type_t> {
   auto val = it->node();
+  // std::println("{}, {}, {}", doancestor, ctx.toks.str(it->as_final()), 
+  //              (uintptr_t)locale.get_ptr());
+  // std::println("Table");
+  // for (auto &elm : locale.get_val().internals.table)
+  //   std::println("\t{}", elm.first);
+
   return ovisit(
       val,
       [&](final_t &val) -> sptr<type_t> {
@@ -861,7 +814,10 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
               "Only IDs are supported in unresoved symbols");
 
         const auto str = ctx.toks.str(val);
-        auto lookup = locale_t::ancestor_lookup(locale, str);
+        auto lookup = (doancestor == true)
+                          ? locale_t::ancestor_lookup(locale, str)
+                          : locale_t::local_lookup(locale, str);
+
         if (!lookup.found) [[unlikely]]
           throw std::runtime_error("Failed to find symbol " + std::string(str));
 
@@ -870,7 +826,7 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
             [&](decl_s::scope_decl_t &val) -> sptr<type_t> {
               if (it.next() >= end)
                 throw std::runtime_error("scopes can't be types");
-              return type_impl_fn(ctx, val.get_locale(), it.next(), end);
+              return type_impl_fn<false>(ctx, val.get_locale(), it.next(), end);
             },
             [&](decl_s::type_decl_t &val) -> sptr<type_t> {
               if (it.next() >= end)
@@ -881,18 +837,26 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
                     return ovisit(
                         val,
                         [&](type_s::rec_t &val) -> sptr<type_t> {
-                          return type_impl_fn(ctx, val.loc, it.next(), end);
+                          return type_impl_fn<false>(ctx, val.loc, it.next(), end);
                         },
                         [&](auto &) -> sptr<type_t> {
                           throw std::runtime_error(
                               "Not supported aggregate type");
                         });
                   },
+                  [&](type_s::type_ref_t &val) -> sptr<type_t> {
+                    // this is what saves us form infinite recursion
+                    //  if we had a recursive call here we would be suscibtable
+                    //  to unending recursion
+                    return val.ref;
+                  },
                   [&](unresolved_t &v) -> sptr<type_t> {
-                    // std::println("{}", ctx.toks.str(v.med.first()));
-                    auto lookup = locale_t::ancestor_lookup(
-                        locale, ctx.toks.str(v.med.first()));
-
+                    auto lookup =
+                        (doancestor == true)
+                            ? locale_t::ancestor_lookup(
+                                  locale, ctx.toks.str(v.med.first()))
+                            : locale_t::local_lookup(
+                                  locale, ctx.toks.str(v.med.first()));
                     if (!lookup.found)
                       throw std::runtime_error("Unable to find symbol");
 
@@ -902,8 +866,59 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
                     if (node == ctx.callback_map.end()) [[unlikely]]
                       throw std::runtime_error("Unknown symbol");
 
-                    throw std::runtime_error(
-                        "Unresolved symbols are not supported at this moment");
+                    node->second();
+
+                    auto &callback = node->second;
+
+                    using ret = sptr<type_t>;
+                    auto type_lam = [&](sptr<type_t> &type, auto &self) -> ret {
+                      return ovisit(
+                          *type,
+                          [&](type_s::type_ref_t &val) -> ret {
+                            return self(val.ref, self);
+                          },
+                          [&](type_s::aggregate_t &val) -> ret {
+                            return ovisit(
+                                val,
+                                [&](type_s::rec_t &val) -> ret {
+                                  return type_impl_fn<false>(ctx, val.get_locale(),
+                                                      it.next(), end);
+                                },
+                                [](auto &) -> ret {
+                                  throw std::runtime_error(
+                                      "call_t::type_t::aggregate_t Iliigal "
+                                      "type");
+                                });
+                          },
+                          [](auto &) -> ret {
+                            throw std::runtime_error(
+                                "call_t::type_t Illigal type");
+                          });
+                    };
+                    return callback.visit(
+                        [&](resolve_callback_t::call_t<type_t> &val) -> ret {
+                          auto ptr = val.ptr.ptr();
+                          if (it >= end)
+                            return ptr;
+                          return type_lam(ptr, type_lam);
+                        },
+                        [&](resolve_callback_t::call_t<decl_t> &val) -> ret {
+                          auto ptr = val.ptr.ptr();
+                          return ovisit(
+                              *ptr,
+                              [&](decl_s::scope_decl_t &val) -> ret {
+                                return type_impl_fn<false>(
+                                    ctx, val.get_locale(), it.next(), end);
+                              },
+                              [&](decl_s::type_decl_t &val) -> ret {
+                                return type_lam(val.type, type_lam);
+                              },
+                              [](auto &) -> ret {
+                                throw std::runtime_error(
+                                    "call_t::decl_t, Illigal "
+                                    "type");
+                              });
+                        });
                   },
                   [](auto &val) -> sptr<type_t> {
                     throw std::runtime_error(
@@ -932,7 +947,7 @@ auto type_ptr_asignment(context_t &ctx, sptr<locale_t> locale,
 
   if (rholds<unresolved_t>(*ptr.ptr())) [[likely]] {
     auto span = ptr.get().med.children();
-    *(ptr.ptr()) = type_s::type_ref_t{resolve_callaback_s::type_impl_fn(
+    *(ptr.ptr()) = type_s::type_ref_t{resolve_callaback_s::type_impl_fn<true>(
         ctx, locale, span.begin(), span.end())};
   }
   return ptr.ptr();

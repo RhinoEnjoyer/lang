@@ -56,5 +56,5 @@ b: @type c;
 c: @type d;
 d: @type e;
 e: @type f;
-f: @type g::a;
-g: @type @rec(o:@type a);
+f: @type g::booba;
+g: @type @rec(booba:@type a::b);

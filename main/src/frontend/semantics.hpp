@@ -6,6 +6,7 @@
 #include "../mesure.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <print>
 #include <stdexcept>
 #include <string_view>
@@ -605,16 +606,25 @@ struct resolve_callback_t {
     std::function<void(ssptr<unresolved_t, T>)> call;
     void operator()() { call(ptr); }
   };
+
   var<call_t<type_t>, call_t<decl_t>> call;
 
-  template <typename T> auto get_ptr() -> sptr<T> & {
-    return std::get<call_t<T>>(call).ptr;
+  template <typename T> auto get_ptr() -> opt<std::reference_wrapper<sptr<T>>> {
+    if(rholds<call_t<T>>(call))
+      return std::get<call_t<T>>(call).ptr;
+    return std::nullopt;
   }
-  template <typename T> auto get_callback_obj() -> call_t<T> & {
-    return std::get<call_t<T>>(call);
+  template <typename T> auto get_callback_obj() -> opt<std::reference_wrapper<call_t<T>>>{
+    if(rholds<call_t<T>>(call))
+      return std::get<call_t<T>>(call);
+    return std::nullopt;
   }
   void operator()() {
     ovisit(call, [](auto &val) -> auto { return val(); });
+  }
+
+  template <typename... FNS> auto visit(FNS... fns) -> auto {
+    return ovisit(call, std::forward<FNS>(fns)...);
   }
 };
 
