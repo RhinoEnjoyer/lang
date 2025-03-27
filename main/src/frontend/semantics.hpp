@@ -1,5 +1,7 @@
 #pragma once
 
+#define SEMANTICS_DEBUG
+
 #include "../nicknames.hpp"
 #include "../table.hpp"
 #include "./parser.hpp"
@@ -8,13 +10,13 @@
 #include <cstdint>
 #include <functional>
 #include <print>
+#include <source_location>
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <variant>
-
 
 //Multi files
 // start form one file
@@ -61,6 +63,9 @@ struct unresolved_t {
   median_t med;
 };
 
+namespace type_s {
+struct template_args_t;
+}
 namespace decl_s {
 struct scope_decl_t : public ask_t {
   sptr<locale_t> loc;
@@ -78,6 +83,12 @@ struct var_decl_t {
 };
 
 struct type_decl_t {
+  struct template_module_t{
+    sptr<locale_t> locale;
+    sptr<type_s::template_args_t> targs;
+  };
+
+  opt<template_module_t> mod;
   sptr<type_t> type;
 };
 
@@ -89,6 +100,11 @@ struct unwrap_decl_elm_t {
 struct fn_decl_t {
   sptr<type_t> sig;
   sptr<expr_t> body;
+};
+
+struct unresolved_t {
+  median_t type;
+  opt<median_t> value;
 };
 
 using var = var<empty_t, unresolved_t, fn_decl_t, unwrap_decl_elm_t, var_decl_t,
@@ -171,19 +187,17 @@ using indirection_t = var<ref_t, ptr_t, optr_t>;
 struct void_t {};
 VAR_MACRO(primitive, void_t, indirection_t, numeric_t);
 
-struct template_args_t{
+struct template_args_t {
   list<sptr<decl_t>> args;
 };
 
 struct rec_t: public ask_t {
   sptr<locale_t> loc;
-  sptr<template_args_t> targs;
+  // sptr<template_args_t> targs;
   sptr<stmts_t> members;
 
-  rec_t(sptr<locale_t> l, sptr<template_args_t>& t, sptr<stmts_t> m)
-      : ask_t(), loc(l), targs(t), members(m) {}
-  rec_t(sptr<locale_t> l, sptr<template_args_t>&& t, sptr<stmts_t> m)
-      : ask_t(), loc(l), targs(std::move(t)), members(m) {}
+  rec_t(sptr<locale_t> l, /* sptr<template_args_t>& t, */ sptr<stmts_t> m)
+      : ask_t(), loc(l), /* targs(t), */ members(m) {}
 
   sptr<locale_t> get_locale() override { return loc; }
 };
@@ -194,7 +208,6 @@ VAR_MACRO(aggregate, rec_t, tup_t);
 
 
 struct fntype_t{
-  // sptr<template_args_t> tempalte_args;
   list<sptr<type_t>> arg_types;
   sptr<type_t> ret_type;
 };
@@ -205,32 +218,31 @@ struct fntemplate_t{
   sptr<type_t> ret_type;
 };
 
-struct fnsig_t: public ask_t {
+struct fnsig_t : public ask_t {
   sptr<locale_t> locale;
   sptr<template_args_t> template_args;
   list<ssptr<decl_s::var_decl_t, decl_t>> args;
   sptr<type_t> ret_type;
 
-  fnsig_t(sptr<locale_t> l, sptr<template_args_t >ta,
+  fnsig_t(sptr<locale_t> l, sptr<template_args_t> ta,
           list<ssptr<decl_s::var_decl_t, decl_t>> &a, sptr<type_t> r)
       : ask_t(), locale(l), template_args(ta), args(a), ret_type(r) {}
 
-  fnsig_t(sptr<locale_t> l, sptr<template_args_t >ta,
+  fnsig_t(sptr<locale_t> l, sptr<template_args_t> ta,
           list<ssptr<decl_s::var_decl_t, decl_t>> &&a, sptr<type_t> r)
       : ask_t(), locale(l), template_args(ta), args(std::move(a)), ret_type(r) {
   }
 
   sptr<locale_t> get_locale() override { return locale; }
-
 };
-struct fn_t: public ask_t {
+
+struct fn_t : public ask_t {
   sptr<fnsig_t> sig;
 
   fn_t(sptr<fnsig_t> s): ask_t(), sig(s)  {}
   
   // sptr<stmts_t> body;
   sptr<locale_t> get_locale() override { return sig->get_locale(); }
-
 };
 struct closure_t: public ask_t {
   sptr<fnsig_t> sig;
@@ -316,73 +328,6 @@ struct deref_t   : op_unary_base<11, op_assoc_e::RIGHT> {};
 struct address_t : op_unary_base<11, op_assoc_e::RIGHT> {};
 struct as_t      : op_unary_base<10, op_assoc_e::RIGHT> {sptr<type_t> type;};
 VAR_MACRO(operator, pipe_t, neg_t, deref_t, address_t, as_t, assignment_t, binary_t, comparison_t, arithmetic_t);
-
-auto token_to_operator(const tokc::e token) -> operator_t {
-  switch (token) {
-  case tokc::EQUALS:
-    return eq_t{};
-  case tokc::GEQUALS:
-    return geq_t{};
-  case tokc::LEQUALS:
-    return leq_t{};
-  case tokc::EMARKEQUALS:
-    return neq_t{};
-  case tokc::PLUSASIGN:
-    return plusassign_t{};
-  case tokc::MINUSASIGN:
-    return minusassign_t{};
-  case tokc::DIVASIGN:
-    return divassign_t{};
-  case tokc::MULASIGN:
-    return multassign_t{};
-  case tokc::ASIGN:
-    return assign_t{};
-  case tokc::PLUSPLUS:
-    return plusplus_t{};
-  case tokc::MINUSMINUS:
-    return minusminus_t{};
-  case tokc::GREATERGREATER:
-    return sright_t{};
-  case tokc::LESSLESS:
-    return sleft_t{};
-  case tokc::LESSGREATER:
-    return neq_t{};
-  case tokc::XOR:
-    return xor_t{};
-  case tokc::AND:
-    return and_t{};
-  case tokc::OR:
-    return or_t{};
-  case tokc::MODULO:
-    return mod_t{};
-  case tokc::PLUS:
-    return plus_t{};
-  case tokc::MINUS:
-    return minus_t{};
-  case tokc::DIV:
-    return div_t{};
-  case tokc::MUL:
-    return mult_t{};
-  case tokc::LESS:
-    return less_t{};
-  case tokc::GREATER:
-    return greater_t{};
-  case tokc::EMARK:
-    return not_t{};
-  case tokc::PERISPOMENI:
-    return deref_t{};
-  case tokc::AMPERSAND:
-    return address_t{};
-  case tokc::ANDASIGN:
-    return assign_t{};
-  case tokc::ORASIGN:
-    return assign_t{};
-  case tokc::MINUSGREATER:
-    return pipe_t{};
-  default:
-    std::unreachable();
-  }
-}
 
 struct number_t {
   std::string_view val;
@@ -601,22 +546,24 @@ struct locale_t {
 };
 
 struct resolve_callback_t {
-  template <typename T> struct call_t {
-    ssptr<unresolved_t, T> ptr;
-    std::function<void(ssptr<unresolved_t, T>)> call;
+  template <typename Y, typename T> struct call_t {
+    ssptr<Y, T> ptr;
+    std::function<void(ssptr<Y, T>)> call;
     void operator()() { call(ptr); }
   };
 
-  var<call_t<type_t>, call_t<decl_t>> call;
+  var<call_t<unresolved_t, type_t>, call_t<decl_s::unresolved_t, decl_t>> call;
 
-  template <typename T> auto get_ptr() -> opt<std::reference_wrapper<sptr<T>>> {
-    if(rholds<call_t<T>>(call))
-      return std::get<call_t<T>>(call).ptr;
+  template <typename Y, typename T>
+  auto get_ptr() -> opt<std::reference_wrapper<sptr<T>>> {
+    if (rholds<call_t<Y, T>>(call))
+      return std::get<call_t<Y, T>>(call).ptr;
     return std::nullopt;
   }
-  template <typename T> auto get_callback_obj() -> opt<std::reference_wrapper<call_t<T>>>{
-    if(rholds<call_t<T>>(call))
-      return std::get<call_t<T>>(call);
+  template <typename Y, typename T>
+  auto get_callback_obj() -> opt<std::reference_wrapper<call_t<Y, T>>> {
+    if (rholds<call_t<Y, T>>(call))
+      return std::get<call_t<Y, T>>(call);
     return std::nullopt;
   }
   void operator()() {
@@ -633,11 +580,29 @@ struct context_t {
   size_t cindex;
   allocator_t &allocator;
 
-  std::map<uintptr_t, resolve_callback_t>
-      callback_map = {};
+  std::map<uintptr_t, resolve_callback_t> callback_map = {};
+
+  #ifdef SEMANTICS_DEBUG
+  struct callstack_entry_t {
+    std::string function;
+    std::string file;
+    int line;
+  };
+  list<callstack_entry_t> dbg_callstack = {};
+  #endif
+
+  void dbg_add_call(std::source_location loc = std::source_location::current()) {
+    #ifdef SEMANTICS_DEBUG
+    dbg_callstack.push_back(
+        {loc.function_name(), loc.file_name(), static_cast<int>(loc.line())});
+    #endif
+  }
+
   template <typename T> void insert_callback(sptr<T> ptr, auto callback) {
     callback_map.insert({(uintptr_t)ptr.get_ptr(), callback});
   }
+
+  auto insert_call() {}
 
   size_t operator++() { return cindex++; }
   static std::size_t size;

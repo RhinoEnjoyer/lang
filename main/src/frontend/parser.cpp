@@ -303,14 +303,14 @@ auto symetrical_impl DISPATCH_FNSIG {
     return ctx.nodes.push_back(node_t::make(med, 0, cursor));
   }
   dive < med, DISPATCH_LAM {
-    size_t count = 0;
+    // size_t count = 0;
     do {
       // std::cout << count << "\n";
       // no fallback
       fn(DISPATCH_ARGS);
       expect<tokc::ENDSTMT>(DISPATCH_ARGS);
       advance(DISPATCH_ARGS);
-      count++;
+      // count++;
     } while (!is<tokc::ENDGROUP>(cursor));
     advance(DISPATCH_ARGS);
   }
@@ -407,9 +407,9 @@ auto attribute_path DISPATCH_FNSIG {
 }
 
 auto template_arg_decl DISPATCH_FNSIG;
+
 auto template_arg_list DISPATCH_FNSIG {
-  cbraces<attribute_path<medianc::ARGUMENT, template_arg_decl>,
-          medianc::TEMPLATE_ARGUMENT_LIST>(DISPATCH_ARGS);
+  cbraces<attribute_path<medianc::ARGUMENT, template_arg_decl>,medianc::TEMPLATE_ARGUMENT_LIST>(DISPATCH_ARGS);
 }
 
 // template <bool enable_state = true, bool enable_template = true>
@@ -590,8 +590,8 @@ auto enum_elm DISPATCH_FNSIG {
 template <fn_t *elm, medianc::e med> auto aggregate_decl_pat DISPATCH_FNSIG {
   advance(DISPATCH_ARGS);
   dive < med, DISPATCH_LAM {
-    if (is<tokc::LCBRACE>(cursor))
-      template_arg_list(DISPATCH_ARGS);
+    // if (is<tokc::LCBRACE>(cursor))
+    //   template_arg_list(DISPATCH_ARGS);
     parens<elm, medianc::BODY>(DISPATCH_ARGS);
   }
   > (DISPATCH_ARGS);
@@ -965,6 +965,11 @@ auto var_decl DISPATCH_FNSIG {
   > (DISPATCH_ARGS);
 }
 
+template<tokc::e intro_tok, auto fn>
+auto optional DISPATCH_FNSIG {
+  if(is<intro_tok>(cursor))
+    fn(DISPATCH_ARGS);
+}
 auto type_decl DISPATCH_FNSIG {
   // dive<medianc::TYPE_DECL,
   //      sequence<push_final, advance<2>,
@@ -974,10 +979,13 @@ auto type_decl DISPATCH_FNSIG {
   //                                      ),
   //                    empty>,
   //               expect<tokc::ENDSTMT>>>(DISPATCH_ARGS);
-
+  
   dive<medianc::TYPE_DECL,
-       sequence<push_final, advance<2>,
-                path<table_t_make(pair_t{tokc::ENDSTMT, empty}), type>>>(
+       sequence<
+       push_final,
+       advance<2>,
+       optional<tokc::LCBRACE, template_arg_list>,
+       type>>(
       DISPATCH_ARGS);
 }
 auto scope_decl DISPATCH_FNSIG {
@@ -1023,7 +1031,10 @@ auto template_arg_decl DISPATCH_FNSIG {
   auto cursor2 = cursor;
   ++cursor2;
   expect<tokc::COLON>(ctx, cursor2);
-  constexpr auto table = table_t_make(pair_t{tokc::BUILTIN_TYPE, type_decl});
+  constexpr auto table = table_t_make(
+      pair_t{tokc::BUILTIN_TYPE,
+             dive<medianc::TYPE_DECL,
+                  sequence<push_final, advance<2>, expect<tokc::ENDSTMT>>>});
   path<table, var_decl, 2>(DISPATCH_ARGS);
 }
 
