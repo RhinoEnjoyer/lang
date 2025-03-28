@@ -1,6 +1,6 @@
 #pragma once
 
-#define SEMANTICS_DEBUG
+// #define SEMANTICS_DEBUG
 
 #include "../nicknames.hpp"
 #include "../table.hpp"
@@ -235,7 +235,6 @@ struct fnsig_t : public ask_t {
 
   sptr<locale_t> get_locale() override { return locale; }
 };
-
 struct fn_t : public ask_t {
   sptr<fnsig_t> sig;
 

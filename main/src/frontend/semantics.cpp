@@ -517,7 +517,7 @@ auto type_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
         return decl_s::type_decl_t::template_module_t{new_locale,
                                                       template_list};
       } else {
-        if(template_args_med)
+        if (template_args_med)
           throw std::runtime_error("When we do not allow init values we do not "
                                    "allow templates either");
       }
@@ -705,7 +705,8 @@ auto result_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> expr_s::result_t {
   ctx.dbg_add_call();
 
-  auto locale = locale_t::make_child(ctx, loc);
+  // auto locale = locale_t::make_child(ctx, loc);
+  auto locale = loc;
   auto stmts = ctx.make_sptr(stmts_t{});
   auto cursor = cursor_helper_t{med.children()};
 
@@ -978,8 +979,10 @@ __attribute__((visibility("default"))) auto entry(allocator_t &allocator,
     return 0;
   });
 
+#ifdef SEMANTICS_DEBUG
   for (const auto &call : ctx.dbg_callstack)
     std::println(std::cerr, "{}, {}", call.function, call.line);
+#endif
   return std::tuple{locale, stmts};
 }
 
@@ -1168,6 +1171,7 @@ auto decl_visitor(context_t &ctx, sptr<locale_t> locale, sptr<decl_t> ptr,
     *ptr = decl_s::var_decl_t{true, type_ptr, body_ptr};
     return;
   };
+
   return ovisit(
       *type_ptr,
       [&ptr, &locale, &ctx, &val_med, &default_visit](type_s::type_ref_t &val) {
@@ -1180,8 +1184,6 @@ auto decl_visitor(context_t &ctx, sptr<locale_t> locale, sptr<decl_t> ptr,
         }
       },
       [&ptr, &locale, &ctx, &val_med](type_s::fntemplate_t &val) {
-        // std::println("Function template");
-
         auto new_locale = ctx.make_sptr(locale_t{*val.locale});
         new_locale->parent_ = locale;
 
@@ -1191,7 +1193,7 @@ auto decl_visitor(context_t &ctx, sptr<locale_t> locale, sptr<decl_t> ptr,
 
         auto body_ptr = sptr<expr_t>{};
         if (val_med) {
-          body_ptr = symbols::expr_fn(ctx, fnsig_ptr->get_locale(),
+          body_ptr = symbols::expr_fn(ctx, new_locale,
                                       val_med.value().fchild().as_median());
         }
 
@@ -1199,15 +1201,9 @@ auto decl_visitor(context_t &ctx, sptr<locale_t> locale, sptr<decl_t> ptr,
         *ptr = fnval;
         return;
       },
-      [&](auto &val) {
-        auto body_ptr = sptr<expr_t>{};
-        if (val_med)
-          body_ptr = symbols::expr_fn(ctx, locale,
-                                      val_med.value().fchild().as_median());
-        *ptr = decl_s::var_decl_t{true, type_ptr, body_ptr};
-        return;
-      });
+      default_visit);
 }
+
 auto decl_fn(context_t &ctx, sptr<locale_t> locale,
              ssptr<decl_s::unresolved_t, decl_t> ptr) -> resolve_callback_t {
   return resolve_callback_t{
