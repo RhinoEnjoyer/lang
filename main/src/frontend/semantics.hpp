@@ -2,10 +2,10 @@
 
 // #define SEMANTICS_DEBUG
 
+#include "../mesure.hpp"
 #include "../nicknames.hpp"
 #include "../table.hpp"
 #include "./parser.hpp"
-#include "../mesure.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -18,18 +18,17 @@
 #include <utility>
 #include <variant>
 
-//Multi files
-// start form one file
-// discover other files
-// spawn threads
-// when resolving a symbol
-// how to be able to retrieve the data???
-//   virtual locale class??
-// ban variable declarations on top level ??
-// (separate functions form variables a bit more??)
-//  
-// 
-
+// Multi files
+//  start form one file
+//  discover other files
+//  spawn threads
+//  when resolving a symbol
+//  how to be able to retrieve the data???
+//    virtual locale class??
+//  ban variable declarations on top level ??
+//  (separate functions form variables a bit more??)
+//
+//
 
 #define VAR_MACRO(name, ...)                                                   \
   using name##_var = var<__VA_ARGS__>;                                         \
@@ -37,7 +36,6 @@
     using name##_var::variant;                                                 \
     using name##_var::operator=;                                               \
   }
-
 
 namespace semantics {
 
@@ -83,7 +81,7 @@ struct var_decl_t {
 };
 
 struct type_decl_t {
-  struct template_module_t{
+  struct template_module_t {
     sptr<locale_t> locale;
     sptr<type_s::template_args_t> targs;
   };
@@ -145,7 +143,7 @@ struct bitsize_t {
   bitsize_t(size_t s) : size(s) {}
   bitsize_t(std::string_view str)
       : size(std::stoull(std::string(str.substr(1)))) {}
- 
+
   auto tobyte() -> size_t { return size / 8; }
 };
 struct float_t : public bitsize_t {
@@ -191,7 +189,7 @@ struct template_args_t {
   list<sptr<decl_t>> args;
 };
 
-struct rec_t: public ask_t {
+struct rec_t : public ask_t {
   sptr<locale_t> loc;
   // sptr<template_args_t> targs;
   sptr<stmts_t> members;
@@ -206,13 +204,12 @@ struct tup_t {
 };
 VAR_MACRO(aggregate, rec_t, tup_t);
 
-
-struct fntype_t{
+struct fntype_t {
   list<sptr<type_t>> arg_types;
   sptr<type_t> ret_type;
 };
 
-struct fntemplate_t{
+struct fntemplate_t {
   sptr<locale_t> locale;
   list<ssptr<decl_s::var_decl_t, decl_t>> args;
   sptr<type_t> ret_type;
@@ -238,14 +235,14 @@ struct fnsig_t : public ask_t {
 struct fn_t : public ask_t {
   sptr<fnsig_t> sig;
 
-  fn_t(sptr<fnsig_t> s): ask_t(), sig(s)  {}
-  
+  fn_t(sptr<fnsig_t> s) : ask_t(), sig(s) {}
+
   // sptr<stmts_t> body;
   sptr<locale_t> get_locale() override { return sig->get_locale(); }
 };
-struct closure_t: public ask_t {
+struct closure_t : public ask_t {
   sptr<fnsig_t> sig;
-  closure_t(sptr<fnsig_t> s): ask_t(), sig(s)  {}
+  closure_t(sptr<fnsig_t> s) : ask_t(), sig(s) {}
   sptr<locale_t> get_locale() override { return sig->get_locale(); }
   // sptr<stmts_t> body;
 };
@@ -257,17 +254,30 @@ struct type_ref_t {
   sptr<type_t> ref;
 };
 
+// struct template_stamper_t {
+//   using ret_t = sptr<type_t>;
+//   using list_t = list<var<sptr<type_t>, sptr<expr_t>>>;
+//   using fntype_t = ret_t(context_t &, sptr<locale_t>, list_t);
+
+//   std::map<list_t, sptr<type_t>> cache;
+//   std::function<fntype_t> stamp_fn;
+
+//   ret_t operator()(context_t &ctx, sptr<locale_t> locale, list_t& args) {
+//     auto find = cache.find(args);
+//     if (find != cache.end())
+//       return find->second;
+//     return stamp_fn(ctx, locale, args);
+//   }
+// };
+
 using var = var<empty_t, fntemplate_t, fntype_t, type_ref_t, infered_t,
                 primitive_t, aggregate_t, callable_t, unresolved_t>;
 } // namespace type_s
 struct type_t : public type_s::var {
   using type_s::var::variant;
 
-  type_s::var& base(){
-    return *this;
-  }
+  type_s::var &base() { return *this; }
 };
-
 
 namespace expr_s {
 enum class op_assoc_e : int { LEFT, RIGHT };
@@ -289,44 +299,49 @@ struct op_bin_base : op_base<op_type_e::BINARY, P, A, 2> {};
 template <size_t P, op_assoc_e A>
 struct op_ternary_base : op_base<op_type_e::TERNARY, P, A, 3> {};
 
-struct plusplus_t   : op_unary_base<12, op_assoc_e::LEFT> {};
+struct plusplus_t : op_unary_base<12, op_assoc_e::LEFT> {};
 struct minusminus_t : op_unary_base<12, op_assoc_e::LEFT> {};
-struct plus_t       : op_bin_base<8,  op_assoc_e::LEFT> {};
-struct minus_t      : op_bin_base<8,  op_assoc_e::LEFT> {};
-struct mult_t       : op_bin_base<9,  op_assoc_e::LEFT> {};
-struct div_t        : op_bin_base<9,  op_assoc_e::LEFT> {};
-struct mod_t        : op_bin_base<9,  op_assoc_e::LEFT> {};
-VAR_MACRO(arithmetic, plus_t, minus_t, mult_t, div_t, mod_t, plusplus_t, minusminus_t);
+struct plus_t : op_bin_base<8, op_assoc_e::LEFT> {};
+struct minus_t : op_bin_base<8, op_assoc_e::LEFT> {};
+struct mult_t : op_bin_base<9, op_assoc_e::LEFT> {};
+struct div_t : op_bin_base<9, op_assoc_e::LEFT> {};
+struct mod_t : op_bin_base<9, op_assoc_e::LEFT> {};
+VAR_MACRO(arithmetic, plus_t, minus_t, mult_t, div_t, mod_t, plusplus_t,
+          minusminus_t);
 
-struct eq_t      : op_bin_base <5,  op_assoc_e::LEFT> {};
-struct neq_t     : op_bin_base <5,  op_assoc_e::LEFT> {};
-struct greater_t : op_bin_base <6,  op_assoc_e::LEFT> {};
-struct less_t    : op_bin_base <6,  op_assoc_e::LEFT> {};
-struct leq_t     : op_bin_base <6,  op_assoc_e::LEFT> {};
-struct geq_t     : op_bin_base <6,  op_assoc_e::LEFT> {};
-VAR_MACRO(comparison,  eq_t, neq_t, greater_t, less_t, leq_t, geq_t);
+struct eq_t : op_bin_base<5, op_assoc_e::LEFT> {};
+struct neq_t : op_bin_base<5, op_assoc_e::LEFT> {};
+struct greater_t : op_bin_base<6, op_assoc_e::LEFT> {};
+struct less_t : op_bin_base<6, op_assoc_e::LEFT> {};
+struct leq_t : op_bin_base<6, op_assoc_e::LEFT> {};
+struct geq_t : op_bin_base<6, op_assoc_e::LEFT> {};
+VAR_MACRO(comparison, eq_t, neq_t, greater_t, less_t, leq_t, geq_t);
 
-struct not_t    : op_unary_base<10, op_assoc_e::RIGHT> {};
-struct and_t    : op_bin_base <4,  op_assoc_e::LEFT> {};
-struct xor_t    : op_bin_base <3,  op_assoc_e::LEFT> {};
-struct or_t     : op_bin_base <2,  op_assoc_e::LEFT> {};
-struct sleft_t  : op_bin_base <7,  op_assoc_e::LEFT> {};
-struct sright_t : op_bin_base <7,  op_assoc_e::LEFT> {};
+struct not_t : op_unary_base<10, op_assoc_e::RIGHT> {};
+struct and_t : op_bin_base<4, op_assoc_e::LEFT> {};
+struct xor_t : op_bin_base<3, op_assoc_e::LEFT> {};
+struct or_t : op_bin_base<2, op_assoc_e::LEFT> {};
+struct sleft_t : op_bin_base<7, op_assoc_e::LEFT> {};
+struct sright_t : op_bin_base<7, op_assoc_e::LEFT> {};
 VAR_MACRO(binary, not_t, and_t, xor_t, or_t, sleft_t, sright_t);
 
-struct assign_t      : op_bin_base <0,  op_assoc_e::RIGHT> {};
-struct plusassign_t  : op_bin_base <0,  op_assoc_e::RIGHT> {};
-struct minusassign_t : op_bin_base <0,  op_assoc_e::RIGHT> {};
-struct multassign_t  : op_bin_base <0,  op_assoc_e::RIGHT> {};
-struct divassign_t   : op_bin_base <0,  op_assoc_e::RIGHT> {};
-VAR_MACRO(assignment, assign_t, plusassign_t, minusassign_t, multassign_t, divassign_t);
+struct assign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
+struct plusassign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
+struct minusassign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
+struct multassign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
+struct divassign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
+VAR_MACRO(assignment, assign_t, plusassign_t, minusassign_t, multassign_t,
+          divassign_t);
 
-struct pipe_t    : op_bin_base <1,  op_assoc_e::LEFT> {};
-struct neg_t     : op_bin_base <11,  op_assoc_e::RIGHT> {};
-struct deref_t   : op_unary_base<11, op_assoc_e::RIGHT> {};
+struct pipe_t : op_bin_base<1, op_assoc_e::LEFT> {};
+struct neg_t : op_bin_base<11, op_assoc_e::RIGHT> {};
+struct deref_t : op_unary_base<11, op_assoc_e::RIGHT> {};
 struct address_t : op_unary_base<11, op_assoc_e::RIGHT> {};
-struct as_t      : op_unary_base<10, op_assoc_e::RIGHT> {sptr<type_t> type;};
-VAR_MACRO(operator, pipe_t, neg_t, deref_t, address_t, as_t, assignment_t, binary_t, comparison_t, arithmetic_t);
+struct as_t : op_unary_base<10, op_assoc_e::RIGHT> {
+  sptr<type_t> type;
+};
+VAR_MACRO(operator, pipe_t, neg_t, deref_t, address_t, as_t, assignment_t,
+          binary_t, comparison_t, arithmetic_t);
 
 struct number_t {
   std::string_view val;
@@ -359,7 +374,7 @@ struct result_t {
   // plus whatever a chain has here
 };
 
-struct if_t{
+struct if_t {
   struct if_intro_t {
     sptr<expr_t> ctrl_expr;
     sptr<stmts_t> stmts;
@@ -377,7 +392,7 @@ struct if_t{
   std::optional<else_t> el;
 };
 
-//chain like
+// chain like
 struct fn_lit_t {
   ssptr<type_s::callable_t, type_t> sig;
   sptr<stmts_t> body;
@@ -416,10 +431,10 @@ struct forloop_t {
   sptr<locale_t> loc;
   sptr<stmts_t> ctrl_expr_stmts;
   sptr<stmts_t> body_stmts;
-  void a (){}
+  void a() {}
 };
-using var =
-    var<empty_t, unwrap_decl_arr_t, forloop_t, import_t, ret_t, sptr<decl_t>, sptr<expr_t>>;
+using var = var<empty_t, unwrap_decl_arr_t, forloop_t, import_t, ret_t,
+                sptr<decl_t>, sptr<expr_t>>;
 } // namespace stmt_s
 struct stmt_t : stmt_s::var {
   using stmt_s::var::variant;
@@ -471,10 +486,13 @@ struct locale_t {
   };
 
   sptr<locale_t> parent_;
+  list<sptr<locale_t>> children_;
 
   // general
-  static sptr<locale_t> make_child(auto& ctx, sptr<locale_t> self) {
-    return ctx.make_sptr(locale_t{self, {}});
+  static sptr<locale_t> make_child(auto &ctx, sptr<locale_t> self) {
+    auto ptr = ctx.make_sptr(locale_t{self, {}});
+    self->children_.push_back(ptr);
+    return ptr;
   }
 
   sptr<locale_t> parent() { return parent_; }
@@ -581,20 +599,21 @@ struct context_t {
 
   std::map<uintptr_t, resolve_callback_t> callback_map = {};
 
-  #ifdef SEMANTICS_DEBUG
+#ifdef SEMANTICS_DEBUG
   struct callstack_entry_t {
     std::string function;
     std::string file;
     int line;
   };
   list<callstack_entry_t> dbg_callstack = {};
-  #endif
+#endif
 
-  void dbg_add_call(std::source_location loc = std::source_location::current()) {
-    #ifdef SEMANTICS_DEBUG
+  void
+  dbg_add_call(std::source_location loc = std::source_location::current()) {
+#ifdef SEMANTICS_DEBUG
     dbg_callstack.push_back(
         {loc.function_name(), loc.file_name(), static_cast<int>(loc.line())});
-    #endif
+#endif
   }
 
   template <typename T> void insert_callback(sptr<T> ptr, auto callback) {

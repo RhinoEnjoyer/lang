@@ -510,6 +510,7 @@ auto type_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
   auto template_mod = [&] -> opt<decl_s::type_decl_t::template_module_t> {
     if constexpr (allow_init_val) {
       if (template_args_med) {
+        throw std::runtime_error("Templates are not supported yet");
         auto template_list = sptr<type_s::template_args_t>{nullptr};
         auto new_locale = locale_t::make_child(ctx, loc);
         template_list = ctx.make_sptr(
@@ -526,8 +527,9 @@ auto type_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
   }();
 
   if constexpr (allow_init_val) {
-    if (template_mod)
-      locale = template_mod->locale;
+    // if (template_mod) {
+    //   locale = template_mod->locale;
+    // }
   }
 
   if (type_med) [[likely]] {
@@ -1184,8 +1186,8 @@ auto decl_visitor(context_t &ctx, sptr<locale_t> locale, sptr<decl_t> ptr,
         }
       },
       [&ptr, &locale, &ctx, &val_med](type_s::fntemplate_t &val) {
-        auto new_locale = ctx.make_sptr(locale_t{*val.locale});
-        new_locale->parent_ = locale;
+        auto new_locale = locale_t::make_child(ctx, locale);
+        *new_locale = *val.locale;
 
         auto fnsig_ptr = ctx.make_sptr<type_s::fnsig_t>(
             type_s::fnsig_t{new_locale, nullptr, val.args, val.ret_type});
