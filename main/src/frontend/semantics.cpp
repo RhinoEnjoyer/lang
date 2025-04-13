@@ -1453,7 +1453,7 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
                               "Not supported aggregate type");
                         });
                   },
-                  [&](type_s::type_ref_t &val) -> sptr<type_t> {
+                  [&](type_s::type_ref_t& val) -> sptr<type_t> {
                     // this is what saves us form infinite recursion
                     //  if we had a recursive call here we would be
                     //  suscibtable to unending recursion
@@ -1639,15 +1639,15 @@ auto decl_visitor(context_t &ctx, sptr<locale_t> locale, sptr<decl_t> ptr,
 
   return ovisit(
       *type_ptr,
-      [&](type_s::type_ref_t &val) {
-        if (val.ref.is_null()) {
-          // this means that it is proably a template
-          // argument so this should change soon
-          return default_visit(ptr);
-        } else {
-          return decl_visitor(ctx, locale, ptr, val.ref, val_med);
-        }
-      },
+      // [&](type_s::type_ref_t &val) {
+      //   if (val.ref.is_null()) {
+      //     // this means that it is proably a template
+      //     // argument so this should change soon
+      //     return default_visit(ptr);
+      //   } else {
+      //     return decl_visitor(ctx, locale, ptr, val.ref, val_med);
+      //   }
+      // },
       [&](type_s::fntemplate_t &val) {
         auto new_locale = locale_t::make_child(ctx, locale);
         *new_locale = *val.locale;
