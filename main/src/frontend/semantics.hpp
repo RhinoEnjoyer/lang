@@ -1,14 +1,14 @@
 #pragma once
 
 // #define SEMANTICS_DEBUG
-
-#include "../mesure.hpp"
+#include <boost/core/typeinfo.hpp>
 #include "../nicknames.hpp"
 #include "../table.hpp"
 #include "./parser.hpp"
 
 #include <cstdint>
 #include <functional>
+#include <iostream>
 #include <print>
 #include <source_location>
 #include <stdexcept>
@@ -53,9 +53,9 @@ using median_t = grammar::node_t::median_proxy_t<false>;
 using final_t = grammar::node_t::final_t;
 using err_t = grammar::node_t::err_t;
 
-struct ask_t {
-  virtual sptr<locale_t> get_locale() = 0;
-};
+// struct ask_t {
+//   virtual sptr<locale_t> get_locale() = 0;
+// };
 
 struct unresolved_t {
   median_t med;
@@ -63,15 +63,17 @@ struct unresolved_t {
 
 namespace type_s {
 struct template_args_t;
-}
+struct callable_t;
+} // namespace type_s
 namespace decl_s {
-struct scope_decl_t : public ask_t {
+
+struct scope_decl_t {
   sptr<locale_t> loc;
   sptr<stmts_t> stmts;
 
   scope_decl_t(sptr<locale_t> l, sptr<stmts_t> s) : loc(l), stmts(s) {}
 
-  sptr<locale_t> get_locale() override { return loc; }
+  sptr<locale_t> get_locale() { return loc; }
 };
 
 struct var_decl_t {
@@ -85,7 +87,6 @@ struct type_decl_t {
     sptr<locale_t> locale;
     sptr<type_s::template_args_t> targs;
   };
-
   opt<template_module_t> mod;
   sptr<type_t> type;
 };
@@ -96,7 +97,7 @@ struct unwrap_decl_elm_t {
 };
 
 struct fn_decl_t {
-  sptr<type_t> sig;
+  ssptr<type_s::callable_t, type_t> sig;
   sptr<expr_t> body;
 };
 
@@ -104,9 +105,19 @@ struct unresolved_t {
   median_t type;
   opt<median_t> value;
 };
+struct template_type_input_t {
+  size_t index;
+  // I need to figure out how to do reqursive relations for this one
+  sptr<type_t> query_register() {
+    throw std::runtime_error("Query register is not implemented yet");
+  }
+};
 
-using var = var<empty_t, unresolved_t, fn_decl_t, unwrap_decl_elm_t, var_decl_t,
-                scope_decl_t, type_decl_t>;
+using template_var_input_t = ssptr<var_decl_t, decl_t>;
+
+using var =
+    var<empty_t, template_type_input_t, template_var_input_t, unresolved_t,
+        fn_decl_t, unwrap_decl_elm_t, var_decl_t, scope_decl_t, type_decl_t>;
 } // namespace decl_s
 
 struct decl_t : public decl_s::var {
@@ -173,35 +184,33 @@ struct boolean_t : public bitsize_t {
 };
 VAR_MACRO(numeric, float_t, sint_t, uint_t, boolean_t);
 
-struct ref_t {
-  sptr<type_t> type;
-};
 struct ptr_t {
   sptr<type_t> type;
 };
 struct optr_t {};
-using indirection_t = var<ref_t, ptr_t, optr_t>;
+using indirection_t = var<ptr_t, optr_t>;
 
 struct void_t {};
-VAR_MACRO(primitive, void_t, indirection_t, numeric_t);
+VAR_MACRO(primitive, void_t, numeric_t);
 
 struct template_args_t {
-  list<sptr<decl_t>> args;
+  using type_input_ptr =ssptr<decl_s::template_type_input_t, decl_t>;
+  using var_input_ptr =ssptr<decl_s::var_decl_t, decl_t>;
+  using var = var<type_input_ptr, var_input_ptr>;
+  using list_t = list<var>;
+  list_t args;
 };
 
-struct rec_t : public ask_t {
+struct rec_t {
   sptr<locale_t> loc;
-  // sptr<template_args_t> targs;
-  sptr<stmts_t> members;
-
-  rec_t(sptr<locale_t> l, /* sptr<template_args_t>& t, */ sptr<stmts_t> m)
-      : ask_t(), loc(l), /* targs(t), */ members(m) {}
-
-  sptr<locale_t> get_locale() override { return loc; }
+  list<sptr<decl_t>> members;
+  sptr<locale_t> get_locale() { return loc; }
 };
 struct tup_t {
   list<sptr<type_t>> types;
+  sptr<locale_t> get_locale() { return nullptr; }
 };
+
 VAR_MACRO(aggregate, rec_t, tup_t);
 
 struct fntype_t {
@@ -215,37 +224,35 @@ struct fntemplate_t {
   sptr<type_t> ret_type;
 };
 
-struct fnsig_t : public ask_t {
+struct fnsig_t {
   sptr<locale_t> locale;
   sptr<template_args_t> template_args;
   list<ssptr<decl_s::var_decl_t, decl_t>> args;
   sptr<type_t> ret_type;
 
-  fnsig_t(sptr<locale_t> l, sptr<template_args_t> ta,
-          list<ssptr<decl_s::var_decl_t, decl_t>> &a, sptr<type_t> r)
-      : ask_t(), locale(l), template_args(ta), args(a), ret_type(r) {}
+  // fnsig_t(sptr<locale_t> l, sptr<template_args_t> ta,
+  //         list<ssptr<decl_s::var_decl_t, decl_t>> &a, sptr<type_t> r)
+  //     : ask_t(), locale(l), template_args(ta), args(a), ret_type(r) {}
 
-  fnsig_t(sptr<locale_t> l, sptr<template_args_t> ta,
-          list<ssptr<decl_s::var_decl_t, decl_t>> &&a, sptr<type_t> r)
-      : ask_t(), locale(l), template_args(ta), args(std::move(a)), ret_type(r) {
-  }
+  // fnsig_t(sptr<locale_t> l, sptr<template_args_t> ta,
+  //         list<ssptr<decl_s::var_decl_t, decl_t>> &&a, sptr<type_t> r)
+  //     : ask_t(), locale(l), template_args(ta), args(std::move(a)), ret_type(r) {
+  // }
 
-  sptr<locale_t> get_locale() override { return locale; }
+  sptr<locale_t> get_locale() { return locale; }
 };
-struct fn_t : public ask_t {
+
+struct fn_t {
   sptr<fnsig_t> sig;
-
-  fn_t(sptr<fnsig_t> s) : ask_t(), sig(s) {}
-
-  // sptr<stmts_t> body;
-  sptr<locale_t> get_locale() override { return sig->get_locale(); }
+  // fn_t(sptr<fnsig_t> s) : ask_t(), sig(s) {}
+  sptr<locale_t> get_locale() { return sig->get_locale(); }
 };
-struct closure_t : public ask_t {
+struct closure_t {
   sptr<fnsig_t> sig;
-  closure_t(sptr<fnsig_t> s) : ask_t(), sig(s) {}
-  sptr<locale_t> get_locale() override { return sig->get_locale(); }
-  // sptr<stmts_t> body;
+  // closure_t(sptr<fnsig_t> s) : ask_t(), sig(s) {}
+  sptr<locale_t> get_locale() { return sig->get_locale(); }
 };
+
 VAR_MACRO(callable, fn_t, closure_t);
 
 struct infered_t {};
@@ -254,28 +261,15 @@ struct type_ref_t {
   sptr<type_t> ref;
 };
 
-// struct template_stamper_t {
-//   using ret_t = sptr<type_t>;
-//   using list_t = list<var<sptr<type_t>, sptr<expr_t>>>;
-//   using fntype_t = ret_t(context_t &, sptr<locale_t>, list_t);
-
-//   std::map<list_t, sptr<type_t>> cache;
-//   std::function<fntype_t> stamp_fn;
-
-//   ret_t operator()(context_t &ctx, sptr<locale_t> locale, list_t& args) {
-//     auto find = cache.find(args);
-//     if (find != cache.end())
-//       return find->second;
-//     return stamp_fn(ctx, locale, args);
-//   }
-// };
-
-using var = var<empty_t, fntemplate_t, fntype_t, type_ref_t, infered_t,
-                primitive_t, aggregate_t, callable_t, unresolved_t>;
+struct template_type_input_t {
+  ssptr<decl_s::template_type_input_t, decl_t> ref;
+};
+using var = var<empty_t, indirection_t, template_type_input_t, fntemplate_t,
+                fntype_t, type_ref_t, infered_t, primitive_t, aggregate_t,
+                callable_t, unresolved_t>;
 } // namespace type_s
 struct type_t : public type_s::var {
   using type_s::var::variant;
-
   type_s::var &base() { return *this; }
 };
 
@@ -466,7 +460,6 @@ struct locale_t {
     size_t size() const { return path.size(); }
     void clear() { path.clear(); }
   };
-
   struct insert_t {
     bool inserted;
     std::string_view name;
@@ -637,6 +630,7 @@ struct context_t {
   }
 };
 
+
 struct cursor_helper_t {
   cursor_helper_t(const span_t s) : span_(s), cursor_(s.begin()) {}
 
@@ -709,4 +703,160 @@ auto entry(allocator_t &allocator, const token_buffer_t &toks,
            grammar::node_t &root_node)
     -> std::tuple<sptr<locale_t>, sptr<stmts_t>>;
 }
+
+
+#define instr std::string(indent*3, ' ')
+#define inprint(next) std::print("{}",instr);next
+#define printvar std::println("{}",boost::core::demangled_name(typeid(val)))
+#define deflam  [&](auto& val){inprint({}); std::cout << "Unknown type: " << boost::core::demangled_name(typeid(val)) << std::endl;}
+
+void print(sptr<decl_t> &val, size_t indent = 0);
+void print(sptr<type_t> &val, size_t indent = 0);
+void print(sptr<expr_elm_t> &val, size_t indent = 0);
+void print(sptr<expr_t> &val, size_t indent = 0);
+void print(sptr<stmt_t> &val, size_t indent = 0);
+void print(sptr<stmts_t> &val, size_t indent = 0);
+void print(sptr<type_s::fnsig_t>&val, size_t indent = 0);
+void print(sptr<type_s::fnsig_t>&val, size_t indent){
+  inprint(printvar);
+  inprint(std::println("{}", (void*)val.get_ptr()));
+
+  if(val->ret_type)
+    print(val->ret_type, indent + 1);
+  if(val->template_args){
+    for (auto &elm : val->template_args->args) {
+      ovisit(elm, [&](auto &val) { print(val.ptr(), indent + 1); });
+    }
+  }
+}
+void print(sptr<decl_t> &val, size_t indent) {
+  inprint(printvar);
+  inprint(std::println("{}", (void*)val.get_ptr()));
+  inprint(std::println("name: {}", val->name));
+  inprint(std::println("dindex: {}", val->dindex));
+  ovisit(
+      val.get_val(),
+      [&indent](decl_s::var_decl_t &val) {
+        inprint(printvar);
+        if (val.type)
+          print(val.type, indent + 1);
+        if (val.expr)
+          print(val.expr, indent + 1);
+      },
+      [&indent](decl_s::type_decl_t &val) {
+        inprint(printvar);
+        if(val.type)
+          print(val.type, indent + 1);
+      },
+      [&indent](decl_s::scope_decl_t &val) {
+        inprint(printvar);
+        print(val.stmts, indent + 1);
+      },
+      [&indent](decl_s::fn_decl_t &val) {
+        inprint(printvar);
+        if(val.sig.ptr())
+          print(val.sig.ptr(), indent + 1);
+        if(val.body)
+          print(val.body, indent + 1);
+      },
+      [&indent](decl_s::unwrap_decl_elm_t &val) {
+        inprint(printvar);
+        inprint(std::println("index: {}",val.index));
+      },
+      [&indent](decl_s::template_var_input_t &val) {
+        inprint(printvar);
+      },
+      [&indent](decl_s::template_type_input_t &val) {
+        inprint(printvar);
+      },
+      [&indent](unresolved_t &val) {
+        inprint(printvar);
+      },
+      deflam);
+}
+
+void print(sptr<type_t> &val, size_t indent) {
+  inprint(printvar);
+  inprint(std::println("{}", (void *)val.get_ptr()));
+
+  ovisit(val.get_val(),
+      [&indent](type_s::type_ref_t &val) {
+        inprint(printvar);
+        inprint(std::println("ref:{}", (void *)val.ref.get_ptr()));
+      },
+      [&indent](type_s::primitive_t &val) {
+        inprint(printvar);
+        ovisit(val,
+            [&indent](type_s::numeric_t &val) {
+              inprint(printvar);
+              ovisit(val, [&indent](auto &val) {
+                inprint(printvar);
+                inprint(std::println("size:{}", val.size));
+              });
+            },
+            deflam);
+      },
+      [&indent](type_s::aggregate_t &val) {
+        inprint(printvar);
+        ovisit(val,
+            [&indent](type_s::rec_t &val) {
+              inprint(printvar);
+              for (auto &elm : val.members)
+                print(elm, indent + 1);
+            },
+            [&indent](type_s::tup_t &val) {
+              inprint(printvar);
+              for (auto &elm : val.types)
+                print(elm, indent + 1);
+            });
+      },
+      deflam);
+}
+
+void print(sptr<expr_elm_t> &val, size_t indent) {
+  inprint(printvar);
+  inprint(std::println("{}", (void*)val.get_ptr()));
+
+  ovisit(val.get_val(),
+         deflam);
+}
+
+void print(sptr<expr_t> &val, size_t indent) {
+  inprint(printvar);
+  inprint(std::println("{}", (void*)val.get_ptr()));
+  for (auto &elm : val->exprs)
+    print(elm, indent + 1);
+}
+
+void print(sptr<stmt_t> &val, size_t indent) { 
+  inprint(printvar);
+  inprint(std::println("{}", (void*)val.get_ptr()));
+  ovisit(
+      val.get_val(),
+      [&indent](stmt_s::import_t &val) {
+        inprint(printvar);
+        inprint(std::println("{}", val.file));
+      },
+      [&indent](stmt_s::ret_t &val) {
+        inprint(printvar);
+        print(val.expr,indent + 1);
+      },
+      [&indent](stmt_s::forloop_t &val) { inprint(printvar); },
+      [&indent](stmt_s::unwrap_decl_arr_t &val) {
+        inprint(printvar);
+        for (auto &elm : val.wraps) {
+          print(elm, indent + 1);
+        }
+      },
+      [&indent](sptr<decl_t> &val) { print(val, indent + 1); },
+      [&indent](sptr<expr_t> &val) { print(val, indent + 1); }, deflam);
+}
+
+void print(sptr<stmts_t> &val, size_t indent) {
+  inprint(printvar);
+  inprint(std::println("{}", (void*)val.get_ptr()));
+  for (auto &elm : val->stmts)
+    print(elm, indent + 1);
+}
+
 } // namespace semantics

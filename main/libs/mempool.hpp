@@ -113,4 +113,28 @@ struct mempool_t {
       destructors.push_back([ptr]() { ptr->~U(); });
   
       return ptr;
-  }};
+  }
+
+  template <typename T, typename ...Args> 
+  T *podalloc(auto destructor_gen_fn, Args&&... args) {
+      using U = std::remove_reference_t<T>;
+      
+      auto& page = top_page();
+      auto ptr = page.alloc<U>();
+  
+      if (!ptr) {
+          make_new_page();
+          return alloc<T>(std::forward<Args>(args)...);
+      }
+
+      if constexpr (sizeof...(Args) > 0) {
+        new (ptr) U(std::forward<Args>(args)...);
+      } else {
+        new (ptr) U();
+      }
+
+      destructors.push_back(destructor_gen_fn(ptr));
+  
+      return ptr;
+  }
+};

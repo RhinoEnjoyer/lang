@@ -68,11 +68,14 @@ template <typename T> struct podlist_t {
 
   void resize(const len_t newcap) {
     T *const re = (T *)realloc(begin_, newcap * sizeof(T));
+
+    // it is never gonna fail :)
     // if(re){
     begin_ = re;
     cap_ = newcap;
+    // } else{
+    //  OwO fail OwO
     // }
-    // it is never gonna fail :)
   }
 
   void release() {

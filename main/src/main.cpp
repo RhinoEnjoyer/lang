@@ -1,16 +1,31 @@
-#include <cstdlib>
-#include <iostream>
-#include <print>
-#include <utility>
-#include <filesystem>
-
 #include "./frontend/lexer.hpp"
 #include "./frontend/parser.hpp"
 #include "./frontend/semantics.hpp"
 #include "./source_buffer.hpp"
 #include "mesure.hpp"
+#include "nicknames.hpp"
 #include "token.hpp"
 #include <boost/program_options.hpp>
+#include <cstdlib>
+#include <filesystem>
+#include <iostream>
+#include <print>
+#include <string_view>
+#include <utility>
+
+void print_tokens(const token_buffer_t& buffer) {
+  std::cout << std::left << std::setw(8) << "Index" << std::setw(8) << "Type"
+            << std::setw(8) << "Row" << std::setw(8) << "Col"
+            << std::setw(8) << "Len" << "Str" << "\n";
+  std::cout << std::string(50, '-') << "\n";
+
+  for (auto it = buffer.toks.cbegin(); it != buffer.toks.cend(); ++it) {
+    std::size_t index = buffer.to_index(it);
+    std::cout << std::setw(8) << index << std::setw(8) << static_cast<int>(it->type())
+              << std::setw(8) << buffer.row(it) << std::setw(8) << buffer.col(it)
+              << std::setw(8) << buffer.len(it) << buffer.str(it) << "\n";
+  }
+}
 
 int main(int argc, char *argv[]) {
   namespace prog_opts = boost::program_options;
@@ -50,11 +65,13 @@ int main(int argc, char *argv[]) {
 
     auto [lex_out, lex_time] = mesure([&] { return lexer::entry(&src); });
     auto &[lex_output, lex_symetrical_map] = lex_out;
+    // print_tokens(lex_output);
 
     auto [grammar_output, grammar_time] = mesure([&] {
       return grammar::entry(lex_output, lex_symetrical_map,
                             lex_output.toks.cbegin(), lex_output.toks.cend());
     });
+
     grammar::traverse(lex_output, grammar_output);
 
     auto symbol_pool = allocator_t::make();
@@ -64,35 +81,37 @@ int main(int argc, char *argv[]) {
     });
     auto &[file_locale, file_stmts] = symbols_result;
 
+    // // TEST
+    // {
+    //   std::println("Running the test");
+    //   auto lookup =
+    //       semantics::locale_t::expect_lookup<semantics::decl_s::scope_decl_t>(
+    //           file_locale, "core");
+
+    //   if (!lookup.found)
+    //     throw std::runtime_error("Did not find core");
+
+    //   auto &scope = lookup.symbol.get();
+    //   {
+    //     auto lookup =
+    //         semantics::locale_t::expect_lookup<semantics::decl_s::type_decl_t>(
+    //             scope.loc, "allocator_t");
+    //     if (!lookup.found)
+    //       std::abort();
+    //     std::println("core::allocator_t exits");
+    //   }
+    // }
+
+    semantics::print(file_stmts);
+
     // TEST
-    {
-      std::println("Running the test");
-      auto lookup =
-          semantics::locale_t::expect_lookup<semantics::decl_s::scope_decl_t>(
-              file_locale, "core");
-
-      if (!lookup.found)
-        throw std::runtime_error("Did not find core");
-
-      auto &scope = lookup.symbol.get();
-      {
-        auto lookup =
-            semantics::locale_t::expect_lookup<semantics::decl_s::type_decl_t>(
-                scope.loc, "allocator_t");
-        if (!lookup.found)
-          std::abort();
-        std::println("core::allocator_t exits");
-      }
-    }
-    // TEST
-
     std::cout << "\n"
               << "Lexer: " << lex_time << "\n"
-              << "\tToken count: " << lex_output.toks.size()*sizeof(token_t)*sizeof(srcloc_t) << "\n"
+              << "\tToken buffer byte count: " << lex_output.toks.size()*sizeof(token_t)*sizeof(srcloc_t) << "\n"
               << "Grammar: " << grammar_time << '\n'
               << "\tNode count: " << grammar_output.length()*sizeof(grammar::node_t) << '\n'
-              << "Symbols: " << symbols_time << '\n'
-              << "\tPool size:" << symbol_pool.allocated_size()
+              // << "Symbols: " << symbols_time << '\n'
+              // << "\tPool size:" << symbol_pool.allocated_size()
               << "\n";
 
     symbol_pool.release();
@@ -109,3 +128,4 @@ int main(int argc, char *argv[]) {
 
   return 0;
 }
+

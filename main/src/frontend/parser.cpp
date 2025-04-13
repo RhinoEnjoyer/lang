@@ -48,11 +48,11 @@
 
 namespace grammar {
 
-struct context_t {
-  const token_buffer_t &toks;
-  const std::map<size_t, size_t> &smap;
-  podlist_t<node_t> &nodes;
-};
+// struct context_t {
+//   const token_buffer_t &toks;
+//   const std::map<size_t, size_t> &smap;
+//   podlist_t<node_t> &nodes;
+// };
 
 // #define DISPATCH_ARGS_DECL                                                     \
 //   const token_buffer_t &toks, podlist_t<node_t> &buffer, cursor_t &cursor
@@ -109,16 +109,13 @@ template <std::array... args> static consteval auto table_t_make() -> auto {
         ...);
     return table;
   }();
-
-  constexpr auto has_conflict = [&] consteval -> bool {
+  static_assert(!([&] consteval -> bool {
     for (auto i = 0; i < table.size(); i++)
       for (auto j = i + 1; j < table.size(); j++)
         if (table[i].first == table[j].first)
           return true;
     return false;
-  }();
-
-  static_assert(!has_conflict, "The table contains confilicting tokens");
+  }()),"The table contains confilicting tokens");
 
   return table;
 }
@@ -199,9 +196,9 @@ template <const tokc::e... type> auto expected DISPATCH_FNSIG {
 
 auto base DISPATCH_FNSIG;
 auto decl DISPATCH_FNSIG;
-auto expr DISPATCH_FNSIG;
+auto expr(context_t &ctx, cursor_t &cursor) -> void;
+auto type(context_t &ctx, cursor_t &cursor) -> void;
 template <bool compound_ext = false> auto chain DISPATCH_FNSIG;
-auto type DISPATCH_FNSIG;
 
 template <str_lit_t reason, tokc::e... type> auto expected DISPATCH_FNSIG {
   std::cerr << "Err: " << reason.value << std::endl;
@@ -603,7 +600,8 @@ auto collection_fn DISPATCH_FNSIG {
       medianc::COLLECTION>(DISPATCH_ARGS);
 }
 auto record_fn DISPATCH_FNSIG {
-  become aggregate_decl_pat<base, medianc::RECORD>(DISPATCH_ARGS);
+  // become aggregate_decl_pat<base, medianc::RECORD>(DISPATCH_ARGS);
+  become aggregate_decl_pat<dive<medianc::ELEMENT, decl>, medianc::RECORD>(DISPATCH_ARGS);
 }
 auto union_fn DISPATCH_FNSIG {
   become aggregate_decl_pat<base, medianc::UNION>(DISPATCH_ARGS);

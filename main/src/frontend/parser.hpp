@@ -321,8 +321,19 @@ struct node_t {
 using node_buffer_t = podlist_t<node_t>;
 using parser_out = podlist_t<node_t>;
 
+struct context_t {
+  const token_buffer_t &toks;
+  const std::map<size_t, size_t> &smap;
+  node_buffer_t &nodes;
+};
+
+
 auto entry(const token_buffer_t &toks, const std::map<size_t, size_t> &smap,
            cursor_t cursor, const cursor_t end) -> parser_out;
+
+//we need those to decipher the templates and anything with ambigous syntax
+auto expr(context_t &ctx, cursor_t &cursor) -> void;
+auto type(context_t &ctx, cursor_t &cursor) -> void;
 
 auto traverse(const token_buffer_t &buf, podlist_t<node_t> &buffer) -> void;
 } // namespace grammar
