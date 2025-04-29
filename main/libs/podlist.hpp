@@ -154,6 +154,15 @@ template <typename T> struct podlist_t {
     ++len_;
   }
 
+  void push_back_assume_size(T &&val) {
+    memcpy(begin_ + len_, &val, sizeof(T));
+    ++len_;
+  }
+  void push_back_assume_size(T &val) {
+    memcpy(begin_ + len_, &val, sizeof(T));
+    ++len_;
+  }
+
   template <typename... Args> void append(Args &&...args) {
     constexpr auto arg_len = sizeof...(Args);
 
@@ -183,6 +192,8 @@ template <typename T> struct podlist_t {
     memcpy(begin_ + len_, span.begin(), sizeof(T) * arg_len);
     len_ += span.size();
   }
+
+  void clear() { this->len_ = 0; }
 
   void insert(std::uint64_t index, std::span<T> span) {
     if (index >= cap_)
@@ -317,46 +328,46 @@ template <typename T> struct podlist_t {
     pointer ptr_;
   };
 
-  template <bool is_const = false> struct span {
-    using iterator = podlist_iterator_t<T, is_const>;
+  // template <bool is_const = false> struct span {
+  //   using iterator = podlist_iterator_t<T, is_const>;
 
-    iterator begin_;
-    iterator end_;
+  //   iterator begin_;
+  //   iterator end_;
 
-    span(iterator begin, iterator end) : begin_(begin), end_(end) {}
-    span(iterator begin, size_t len) : begin_(begin), end_(begin + len) {}
+  //   span(iterator begin, iterator end) : begin_(begin), end_(end) {}
+  //   span(iterator begin, size_t len) : begin_(begin), end_(begin + len) {}
 
-    span(T *bptr, T *eptr) : begin_(bptr), end_(eptr) {}
-    span(T *bptr, size_t len) : begin_(bptr), end_(bptr + len) {}
+  //   span(T *bptr, T *eptr) : begin_(bptr), end_(eptr) {}
+  //   span(T *bptr, size_t len) : begin_(bptr), end_(bptr + len) {}
 
-    iterator begin() const { return begin_; }
-    iterator end() const { return end_; }
+  //   iterator begin() const { return begin_; }
+  //   iterator end() const { return end_; }
 
-    auto operator[](size_t index) -> T & { return *(begin_ + index); }
-    auto operator[](size_t index) const -> const T & {
-      return *(begin_ + index);
-    }
+  //   auto operator[](size_t index) -> T & { return *(begin_ + index); }
+  //   auto operator[](size_t index) const -> const T & {
+  //     return *(begin_ + index);
+  //   }
 
-    span slice(std::size_t start, std::size_t count) const {
-      if (start + count > size())
-        throw std::out_of_range("Span slice out of range");
-      return span(begin_ + start, count);
-    }
+  //   span slice(std::size_t start, std::size_t count) const {
+  //     if (start + count > size())
+  //       throw std::out_of_range("Span slice out of range");
+  //     return span(begin_ + start, count);
+  //   }
 
-    bool empty() const { return begin_ == end_; }
+  //   bool empty() const { return begin_ == end_; }
 
-    bool operator==(const span &other) const {
-      return size() == other.size() && std::equal(begin_, end_, other.begin_);
-    }
+  //   bool operator==(const span &other) const {
+  //     return size() == other.size() && std::equal(begin_, end_, other.begin_);
+  //   }
 
-    bool operator!=(const span &other) const { return !(*this == other); }
+  //   bool operator!=(const span &other) const { return !(*this == other); }
 
-    bool operator<(const span &other) const {
-      return std::lexicographical_compare(begin_, end_, other.begin_,
-                                          other.end_);
-    }
-    std::ptrdiff_t size() const { return end_ - begin_; }
-  };
+  //   bool operator<(const span &other) const {
+  //     return std::lexicographical_compare(begin_, end_, other.begin_,
+  //                                         other.end_);
+  //   }
+  //   std::ptrdiff_t size() const { return end_ - begin_; }
+  // };
 
   // Define types for both const and non-const iterators
   using iterator = podlist_iterator_t<T, false>;
@@ -376,7 +387,7 @@ template <typename T> struct podlist_t {
   const_iterator cend() const { return const_iterator(begin_ + len_); }
 
   template <bool is_const = false> auto view() const {
-    return span<is_const>{begin(), end()};
+    return std::span{begin(), end()};
   }
 
   template <bool cit>

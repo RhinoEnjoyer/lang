@@ -37,6 +37,9 @@ struct token_buffer_t {
   vec<srcloc_t> locs;
   const src_buffer_t *src;
 
+  using tokit_t = vec<token_t>::it;
+  using ctokit_t = vec<token_t>::c_it;
+
   auto to_index(vec<token_t>::c_it it) const -> std::size_t {
     return it.base() - this->toks.begin().base();
   }

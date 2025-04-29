@@ -234,7 +234,7 @@ auto comment(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
       ++pos;
     ++pos;
   } else {
-    return symbol(DISPATCH_ARGS);
+    become symbol(DISPATCH_ARGS);
   }
   become next(DISPATCH_ARGS);
 }
@@ -273,7 +273,7 @@ auto integral_id(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
       type = tokc::TYPE_FLOAT;
       break;
     }
-  } else if (text == "bool") [[unlikely]] {
+  } else if (text == "bool"){
     type = tokc::TYPE_BOOLEAN;
   }
 

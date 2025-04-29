@@ -67,8 +67,8 @@ template <typename T, typename BASE> struct ssptr {
   ssptr(const sptr<BASE> &&ptr) : val(std::move(ptr)) {}
   ssptr(sptr<BASE> &&ptr) : val(std::move(ptr)) {}
 
-  T &get() { return std::get<T>(*val); }
-  const T &get() const { return std::get<T>(*val); }
+  T &get() { return std::get<T>(val.get_val()); }
+  const T &get() const { return std::get<T>(val.get_val()); }
 
   sptr<BASE> &ptr() { return val; }
   const sptr<BASE> ptr() const { return val; }

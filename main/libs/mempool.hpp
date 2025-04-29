@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 
 // if one allocation doesn't fit
 //  it will cause some dead space to be left on the previous page
@@ -55,13 +56,14 @@ struct page_t {
 
 struct mempool_t {
   using page_list = podlist_t<page_t>;
+  std::mutex mutex;
   page_list pages;
   std::vector<std::function<void()>> destructors;
 
   static mempool_t make() {
     auto list = page_list::create(10);
     list.push_back(page_t::make(1024));
-    return {std::move(list), {}};
+    return {{}, std::move(list), {}};
   }
 
   size_t capacity_size() const {
@@ -78,13 +80,7 @@ struct mempool_t {
   }
   size_t pool_size() const { return pages.size(); }
 
-  void release() {
-    for (auto &d : destructors)
-      d();
-    for (auto &page : pages)
-      page.release();
-    pages.release();
-  }
+private:
   auto &top_page() { return pages.back(); }
   const auto &top_page() const { return pages.back(); }
 
@@ -92,49 +88,65 @@ struct mempool_t {
     pages.push_back(page_t::make(4096 * (pages.size() + 1)));
   }
 
-  template <typename T, typename ...Args> 
-  T *alloc(Args&&... args) {
-      using U = std::remove_reference_t<T>;
-      
-      auto& page = top_page();
-      auto ptr = page.alloc<U>();
-  
-      if (!ptr) {
-          make_new_page();
-          return alloc<T>(std::forward<Args>(args)...);
-      }
+public:
+  template <typename T, typename... Args> T *alloc(Args &&...args) {
+    using U = std::remove_reference_t<T>;
 
-      if constexpr (sizeof...(Args) > 0) {
-        new (ptr) U(std::forward<Args>(args)...);
-      } else {
-        new (ptr) U();
-      }
+    mutex.lock();
+  AGAIN:
+    auto &page = top_page();
 
-      destructors.push_back([ptr]() { ptr->~U(); });
-  
-      return ptr;
+    auto ptr = page.alloc<U>();
+    // THIS IS REALLY BAD BTW
+    // THIS IS REALLY BAD BTW
+    // THIS IS REALLY BAD BTW
+    if (!ptr) {
+      make_new_page();
+      goto AGAIN;
+    }
+    destructors.push_back([ptr]() { ptr->~U(); });
+    mutex.unlock();
+
+    if constexpr (sizeof...(Args) > 0) {
+      new (ptr) U(std::forward<Args>(args)...);
+    } else {
+      new (ptr) U();
+    }
+
+    return ptr;
   }
 
-  template <typename T, typename ...Args> 
-  T *podalloc(auto destructor_gen_fn, Args&&... args) {
-      using U = std::remove_reference_t<T>;
-      
-      auto& page = top_page();
-      auto ptr = page.alloc<U>();
-  
-      if (!ptr) {
-          make_new_page();
-          return alloc<T>(std::forward<Args>(args)...);
-      }
+  template <typename T, typename... Args>
+  T *podalloc(auto destructor_gen_fn, Args &&...args) {
+    using U = std::remove_reference_t<T>;
+    mutex.lock();
+  AGAIN:
+    auto &page = top_page();
+    auto ptr = page.alloc<U>();
 
-      if constexpr (sizeof...(Args) > 0) {
-        new (ptr) U(std::forward<Args>(args)...);
-      } else {
-        new (ptr) U();
-      }
+    // THIS IS REALLY BAD BTW
+    // THIS IS REALLY BAD BTW
+    // THIS IS REALLY BAD BTW
+    if (!ptr) {
+      make_new_page();
+      goto AGAIN;
+    }
+    destructors.push_back(destructor_gen_fn(ptr));
+    mutex.unlock();
 
-      destructors.push_back(destructor_gen_fn(ptr));
-  
-      return ptr;
+    if constexpr (sizeof...(Args) > 0) {
+      new (ptr) U(std::forward<Args>(args)...);
+    } else {
+      new (ptr) U();
+    }
+
+    return ptr;
+  }
+  void release() {
+    for (auto &d : destructors)
+      d();
+    for (auto &page : pages)
+      page.release();
+    pages.release();
   }
 };

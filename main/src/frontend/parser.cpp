@@ -8,6 +8,7 @@
 #include <print>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 // we need better error handling
@@ -196,7 +197,9 @@ template <const tokc::e... type> auto expected DISPATCH_FNSIG {
 
 auto base DISPATCH_FNSIG;
 auto decl DISPATCH_FNSIG;
+__attribute__((visibility("default")))
 auto expr(context_t &ctx, cursor_t &cursor) -> void;
+__attribute__((visibility("default")))
 auto type(context_t &ctx, cursor_t &cursor) -> void;
 template <bool compound_ext = false> auto chain DISPATCH_FNSIG;
 
@@ -633,13 +636,9 @@ constexpr auto anon_type_table = table_t_make<
         pair_t{tokc::BUILTIN_VECTOR,
                sequence<advance, symetrical<type, medianc::VECTOR>>})>();
 
-// static constexpr auto type_prefix_table = table_t_make(
-//     pair_t{tokc::CARET, push_final},
-//     pair_t{tokc::PERISPOMENI, push_final},
-//     pair_t{tokc::LBRACE, symetrical<expr>});
 static constexpr auto type_prefix_table = table_t_make(
     pair_t{tokc::PERISPOMENI, dive<medianc::PTR, advance2<type>>},
-    // pair_t{tokc::CARET, dive<medianc::REF, advance2<type>>}
+    pair_t{tokc::CARET, dive<medianc::IMMUTABLE_PTR, advance2<type>>},
     pair_t{tokc::LBRACE, symetrical<expr>} // todo //why did I comment this out
 );
 
@@ -716,7 +715,7 @@ const auto &if_branch = sequence<ctrl_expr, body>;
 
 auto if_else_path DISPATCH_FNSIG;
 constexpr auto elif_pair = pair_t{
-    tokc::LPAREN, sequence<dive<medianc::ELIF, if_branch>, if_else_path>};
+    tokc::LPAREN, sequence<dive<medianc::IF, if_branch>, if_else_path>};
 constexpr auto el_pair = pair_t{tokc::LCBRACE, dive<medianc::ELSE, body>};
 constexpr auto set = table_t_make(elif_pair, el_pair);
 auto if_else_path DISPATCH_FNSIG {
@@ -968,27 +967,17 @@ auto optional DISPATCH_FNSIG {
   if(is<intro_tok>(cursor))
     fn(DISPATCH_ARGS);
 }
+
+
 auto type_decl DISPATCH_FNSIG {
-  // dive<medianc::TYPE_DECL,
-  //      sequence<push_final, advance<2>,
-  //               path<table_t_make(pair_t{tokc::ASIGN,
-  //                                        sequence<consume<tokc::ASIGN>,
-  //                                        type>}
-  //                                      ),
-  //                    empty>,
-  //               expect<tokc::ENDSTMT>>>(DISPATCH_ARGS);
-  
   dive<medianc::TYPE_DECL,
-       sequence<
-       push_final,
-       advance<2>,
-       optional<tokc::LCBRACE, template_arg_list>,
-       type>>(
+       sequence<push_final, advance<2>,
+                optional<tokc::LCBRACE, template_arg_list>, type>>(
       DISPATCH_ARGS);
 }
+
 auto scope_decl DISPATCH_FNSIG {
   dive < medianc::SCOPE_DECL, DISPATCH_LAM {
-    auto name = ctx.toks.str(cursor);
     push_final(DISPATCH_ARGS);
     cursor.advance(2);
     sequence<
@@ -1036,19 +1025,25 @@ auto template_arg_decl DISPATCH_FNSIG {
   path<table, var_decl, 2>(DISPATCH_ARGS);
 }
 
+auto template_stamp_decl DISPATCH_FNSIG {
+  become dive<medianc::TEMPLATE_STAMP_DECL,
+              sequence<push_final, advance<2>, template_arg_list, type,
+                       expect<tokc::ENDSTMT>>>(DISPATCH_ARGS);
+}
 auto decl DISPATCH_FNSIG {
   static const auto &a =
       path<table_t_make(pair_t{tokc::BUILTIN_SCOPE, scope_decl},
                         pair_t{tokc::BUILTIN_TYPE, type_decl},
-                        pair_t{tokc::BUILTIN_FN, fn_decl}),
+                        // pair_t{tokc::BUILTIN_TEMPLATE, template_stamp_decl},
+                        pair_t{tokc::BUILTIN_FN, fn_decl}
+                        ),
            var_decl, 2>;
   become a(DISPATCH_ARGS);
 }
 
 constexpr auto base_decls = table_t_make(
     pair_t{tokc::ID, path<table_t_make(pair_t{tokc::COLON, decl},
-                                       pair_t{tokc::COLONASIGN, var_decl}),
-                          expr, 1>},
+                                       pair_t{tokc::COLONASIGN, var_decl}),expr, 1>},
     pair_t{tokc::LBRACE, unwrap_decl});
 
 constexpr auto base_return = table_t_make(
@@ -1077,7 +1072,6 @@ auto base DISPATCH_FNSIG {
 __attribute__((visibility("default"))) auto
 entry(const token_buffer_t &toks, const std::map<size_t, size_t> &smap,
       cursor_t cursor, const cursor_t end) -> parser_out {
-
   auto nodes = podlist_t<node_t>::create(64);
   auto ctx = context_t{toks, smap, nodes};
   symetrical<base, medianc::FILE>(ctx, cursor);

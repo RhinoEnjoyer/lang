@@ -1,51 +1,24 @@
-core: @scope (
-  allocator_t: @type  @rec(
-    alloc_fn:   @type @fn(allocator: @ptr;size :u64)(@ptr);
-    realloc_fn: @type @fn(allocator: @ptr;ptr: @ptr;size: u64)(@ptr);
-    free_fn:    @type @fn(allocator: @ptr;ptr: @ptr);
-    aptr: @ptr;
+T: @type s32;
+Y: @type f128;
 
-    internal: @scope(
-      alloc: ~alloc_fn;
-      realloc:~realloc_fn;
-      free:   ~free_fn;
-    );
+fn_template: @type @fn(arg1: ~T; arg2: ~Y)(s32);
+val: s32 = 10 -> @pipe*20 -> @pipe*10;
 
-    alloc:   alloc_fn = internal::alloc;
-    realloc: realloc_fn = internal::realloc;
-    free:    free_fn = internal::free;
-  );
 
-  pool_t: @type @rec(
-    data: @ptr;
-    size: u64;
-    capacity: u64;
-    alloc: allocator_t::alloc_fn = (
-      pool := @as{~pool_t}allocator;
-      size + pool::size ->
-        @if(@pipe > pool::capacity)
-            (@ret @null);
-      res := data + pool::size;
-      pool::size += size;
-      @ret res;
-    );
-    realloc: allocator_t::realloc_fn = @null;
-    free:  allocator_t::free_fn = ();
-    make: @fn(mem: @ptr; capacity: u64)(pool_t) = (@ret {pool_t}::(mem; 0; capacity));
-    make_allocator: @fn->(allocator_t) = (
-      @ret {allocator_t}::(@self; pool_t::malloc; pool_t::realloc; pool_t::free);
-    );
-  );
+func: fn_template = (
+  
 );
 
-main: @fn(argc: s32; argv: ~~u8)(s32) = (
-  pool := @as{u64}1000 -> pool_t::make(c::malloc(@pipe); @pipe);
-  allocator := pool::make_allocator();
-  val: ~s32 = allocator::alloc();
-);
+// fin := init_value 			->
+//       transform(@pipe)  ->
+//       transform2(@pipe) ->
+//       transform3(@pipe) ->
+//       transform4(@pipe);
 
-template: @type @fn(a: s32)(s32);
-fn: template = (
-  b: s32;
-);
+// type: @type s32;
+// type2: @type f128;
 
+// fnname: @fn(something: type; pipe: @mut ~type2; the_rest: s32)(s32) = ();
+
+// some_other_var: type2 = 10.0e-20;
+// foo := some_other_var -> fnname(10; @pipe; 3000);

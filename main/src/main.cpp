@@ -13,7 +13,7 @@
 #include <string_view>
 #include <utility>
 
-void print_tokens(const token_buffer_t& buffer) {
+void print_tokens(const token_buffer_t &buffer) {
   std::cout << std::left << std::setw(8) << "Index" << std::setw(8) << "Type"
             << std::setw(8) << "Row" << std::setw(8) << "Col"
             << std::setw(8) << "Len" << "Str" << "\n";
@@ -76,42 +76,18 @@ int main(int argc, char *argv[]) {
 
     auto symbol_pool = allocator_t::make();
     auto [symbols_result, symbols_time] = mesure([&] {
-      return semantics::symbols::entry(symbol_pool, lex_output,
+      return semantics::symbols::entry(symbol_pool, lex_output, lex_symetrical_map,
                                        *grammar_output.begin());
     });
     auto &[file_locale, file_stmts] = symbols_result;
-
-    // // TEST
-    // {
-    //   std::println("Running the test");
-    //   auto lookup =
-    //       semantics::locale_t::expect_lookup<semantics::decl_s::scope_decl_t>(
-    //           file_locale, "core");
-
-    //   if (!lookup.found)
-    //     throw std::runtime_error("Did not find core");
-
-    //   auto &scope = lookup.symbol.get();
-    //   {
-    //     auto lookup =
-    //         semantics::locale_t::expect_lookup<semantics::decl_s::type_decl_t>(
-    //             scope.loc, "allocator_t");
-    //     if (!lookup.found)
-    //       std::abort();
-    //     std::println("core::allocator_t exits");
-    //   }
-    // }
-
     semantics::print(file_stmts);
-
-    // TEST
     std::cout << "\n"
               << "Lexer: " << lex_time << "\n"
-              << "\tToken buffer byte count: " << lex_output.toks.size()*sizeof(token_t)*sizeof(srcloc_t) << "\n"
+              << "\tToken buffer byte count: " << lex_output.toks.size()*sizeof(token_t)*sizeof(srcloc_t) << "\n" //The compiler is tripping here ->
               << "Grammar: " << grammar_time << '\n'
               << "\tNode count: " << grammar_output.length()*sizeof(grammar::node_t) << '\n'
-              // << "Symbols: " << symbols_time << '\n'
-              // << "\tPool size:" << symbol_pool.allocated_size()
+              << "Symbols: " << symbols_time << '\n'
+              << "\tPool size:" << symbol_pool.allocated_size()
               << "\n";
 
     symbol_pool.release();
@@ -122,7 +98,7 @@ int main(int argc, char *argv[]) {
 
   std::cout.imbue(std::locale("en_US.UTF-8"));
   // after careful consideration llvm::vfs is kinda big and should go
-  //  my to determine was sleep analysis :)
+  //  my way to determine this was sleep analysis :)
   lam(input_file);
   // lam("../main2.foo");
 

@@ -1,6 +1,7 @@
 #pragma once
 
 // #define SEMANTICS_DEBUG
+#include <atomic>
 #include <boost/core/typeinfo.hpp>
 #include "../nicknames.hpp"
 #include "../table.hpp"
@@ -8,10 +9,10 @@
 
 #include <cstdint>
 #include <functional>
-#include <iostream>
+#include <mutex>
 #include <print>
-#include <source_location>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
@@ -53,10 +54,6 @@ using median_t = grammar::node_t::median_proxy_t<false>;
 using final_t = grammar::node_t::final_t;
 using err_t = grammar::node_t::err_t;
 
-// struct ask_t {
-//   virtual sptr<locale_t> get_locale() = 0;
-// };
-
 struct unresolved_t {
   median_t med;
 };
@@ -77,17 +74,20 @@ struct scope_decl_t {
 };
 
 struct var_decl_t {
-  opt<bool> mut;
+  bool mut;
   sptr<type_t> type;
   sptr<expr_t> expr;
 };
 
 struct type_decl_t {
+  sptr<type_t> type;
+};
+struct template_stamp_decl_t {
   struct template_module_t {
     sptr<locale_t> locale;
     sptr<type_s::template_args_t> targs;
   };
-  opt<template_module_t> mod;
+  template_module_t mod;
   sptr<type_t> type;
 };
 
@@ -105,26 +105,22 @@ struct unresolved_t {
   median_t type;
   opt<median_t> value;
 };
-struct template_type_input_t {
-  size_t index;
-  // I need to figure out how to do reqursive relations for this one
-  sptr<type_t> query_register() {
-    throw std::runtime_error("Query register is not implemented yet");
-  }
-};
 
+using template_type_input_t = ssptr<type_decl_t, type_t>;
 using template_var_input_t = ssptr<var_decl_t, decl_t>;
 
-using var =
-    var<empty_t, template_type_input_t, template_var_input_t, unresolved_t,
-        fn_decl_t, unwrap_decl_elm_t, var_decl_t, scope_decl_t, type_decl_t>;
+using var = var<empty_t, template_type_input_t, template_var_input_t,
+                unresolved_t, fn_decl_t, unwrap_decl_elm_t, var_decl_t,
+                scope_decl_t, type_decl_t, template_stamp_decl_t>;
 } // namespace decl_s
 
 struct decl_t : public decl_s::var {
   using decl_s::var::variant;
-  std::string_view name;
+  std::string name;
   size_t dindex;
 
+  decl_t(decl_s::var v, std::string n, size_t i)
+      : decl_s::var(v), name(n), dindex(i) {}
   decl_t(decl_s::var v, std::string_view n, size_t i)
       : decl_s::var(v), name(n), dindex(i) {}
 
@@ -132,13 +128,9 @@ struct decl_t : public decl_s::var {
       : decl_s::var(empty_t{}), name(n), dindex(i) {}
 
   decl_t &operator=(const auto &rhs) {
-    // only update the underlying variant portion, leaving name and dindex
-    // intact.
     static_cast<decl_s::var &>(*this) = rhs;
     return *this;
   }
-
-  // (optional) overload move assignment operator for decl_s::var
   decl_t &operator=(auto &&rhs) {
     static_cast<decl_s::var &>(*this) = std::move(rhs);
     return *this;
@@ -146,8 +138,6 @@ struct decl_t : public decl_s::var {
 };
 
 namespace type_s {
-using type_ptr = sptr<type_t>;
-
 struct bitsize_t {
   size_t size;
 
@@ -156,9 +146,21 @@ struct bitsize_t {
       : size(std::stoull(std::string(str.substr(1)))) {}
 
   auto tobyte() -> size_t { return size / 8; }
+  bool operator==(const bitsize_t &other) {
+    return this->size == other.size;
+  }
 };
-struct float_t : public bitsize_t {
-  // could make it bettr but it works and i do not think i will ever change it
+
+#define numeric_var_cmp_fn_macro(T)                                                              \
+  inline bool operator==(const T &other) const {                               \
+    return this->size == other.size;                                           \
+  }
+#define numeric_var_bitsize_constructor(T)                                     \
+  T(const size_t val) : bitsize_t(val) {}                                      \
+  T(const std::string_view val) : bitsize_t(val) {}
+
+struct float_t : bitsize_t {
+  // could make it better but it works and i do not think i will ever change it
   // so it is fine
   float_t(const size_t len) : bitsize_t(len) {
     if (size != 16 && size != 32 && size != 64 && size != 80 && size != 128) {
@@ -172,23 +174,38 @@ struct float_t : public bitsize_t {
           "invalid bit size for float_t. allowed: 16, 32, 64, 80, 128.");
     }
   }
+  numeric_var_cmp_fn_macro(float_t)
 };
-struct sint_t : public bitsize_t {
-  using bitsize_t::bitsize_t;
+
+struct sint_t : bitsize_t {
+  numeric_var_bitsize_constructor(sint_t)
+  numeric_var_cmp_fn_macro(sint_t)
 };
-struct uint_t : public bitsize_t {
-  using bitsize_t::bitsize_t;
+struct uint_t : bitsize_t {
+  numeric_var_bitsize_constructor(uint_t)
+  numeric_var_cmp_fn_macro(uint_t)
 };
-struct boolean_t : public bitsize_t {
-  using bitsize_t::bitsize_t;
+struct boolean_t : bitsize_t {
+  numeric_var_bitsize_constructor(boolean_t)
+  numeric_var_cmp_fn_macro(boolean_t)
 };
-VAR_MACRO(numeric, float_t, sint_t, uint_t, boolean_t);
+
+using numeric_var = var<float_t, sint_t, uint_t, boolean_t>;
+struct numeric_t : public numeric_var {
+  using numeric_var ::variant;
+  using numeric_var ::operator=;
+};
+
+
 
 struct ptr_t {
   sptr<type_t> type;
 };
+struct iptr_t {
+  sptr<type_t> type;
+};
 struct optr_t {};
-using indirection_t = var<ptr_t, optr_t>;
+VAR_MACRO(indirection, ptr_t, iptr_t, optr_t);
 
 struct void_t {};
 VAR_MACRO(primitive, void_t, numeric_t);
@@ -206,6 +223,7 @@ struct rec_t {
   list<sptr<decl_t>> members;
   sptr<locale_t> get_locale() { return loc; }
 };
+
 struct tup_t {
   list<sptr<type_t>> types;
   sptr<locale_t> get_locale() { return nullptr; }
@@ -273,82 +291,177 @@ struct type_t : public type_s::var {
   type_s::var &base() { return *this; }
 };
 
+struct expr_elm_t;
 namespace expr_s {
+
+enum class op_type_e : int { UNARY = 1, BINARY = 2, TERNARY = 3 };
 enum class op_assoc_e : int { LEFT, RIGHT };
-enum class op_type_e : int { UNARY, BINARY, TERNARY };
+enum class op_operation_e : int {
+  PLUS,
+  MINUS,
+  MULT,
+  DIV,
+  MOD,
+  PLUSPLUS,
+  MINUSMINUS,
 
-template <op_type_e TYPE, size_t P, op_assoc_e A, size_t AR = 2>
-struct op_base {
-  static constexpr op_type_e type() { return TYPE; }
-  static constexpr size_t prec() { return P; }
-  static constexpr op_assoc_e assoc() { return A; }
-  static constexpr size_t arity() { return AR; }
-  auto &base() { return *this; }
+  EQ,
+  NEQ,
+  GREATER,
+  LESS,
+  LEQ,
+  GEQ,
+
+  NOT,
+  AND,
+  XOR,
+  OR,
+  SLEFT,
+  SRIGHT,
+
+  ASSIGN,
+  PLUSASSIGN,
+  MINUSASSIGN,
+  MULTASSIGN,
+  DIVASSIGN,
+
+  PIPE,
+  NEG,
+  DEREF,
+  ADDRESS,
+  AS,
+
+  last
+};
+inline const char* str(op_operation_e op) {
+  switch (op) {
+    case op_operation_e::PLUS: return "PLUS";
+    case op_operation_e::MINUS: return "MINUS";
+    case op_operation_e::MULT: return "MULT";
+    case op_operation_e::DIV: return "DIV";
+    case op_operation_e::MOD: return "MOD";
+    case op_operation_e::PLUSPLUS: return "PLUSPLUS";
+    case op_operation_e::MINUSMINUS: return "MINUSMINUS";
+    case op_operation_e::EQ: return "EQ";
+    case op_operation_e::NEQ: return "NEQ";
+    case op_operation_e::GREATER: return "GREATER";
+    case op_operation_e::LESS: return "LESS";
+    case op_operation_e::LEQ: return "LEQ";
+    case op_operation_e::GEQ: return "GEQ";
+    case op_operation_e::NOT: return "NOT";
+    case op_operation_e::AND: return "AND";
+    case op_operation_e::XOR: return "XOR";
+    case op_operation_e::OR: return "OR";
+    case op_operation_e::SLEFT: return "SLEFT";
+    case op_operation_e::SRIGHT: return "SRIGHT";
+    case op_operation_e::ASSIGN: return "ASSIGN";
+    case op_operation_e::PLUSASSIGN: return "PLUSASSIGN";
+    case op_operation_e::MINUSASSIGN: return "MINUSASSIGN";
+    case op_operation_e::MULTASSIGN: return "MULTASSIGN";
+    case op_operation_e::DIVASSIGN: return "DIVASSIGN";
+    case op_operation_e::PIPE: return "PIPE";
+    case op_operation_e::NEG: return "NEG";
+    case op_operation_e::DEREF: return "DEREF";
+    case op_operation_e::ADDRESS: return "ADDRESS";
+    case op_operation_e::AS: return "AS";
+    case op_operation_e::last: return "last";
+    default: return "UNKNOWN";
+  }
+}
+struct op_meta_t {
+  const op_operation_e op;
+  const op_type_e type;
+  const op_assoc_e assoc;
+  const std::int32_t prec;
+  const bool has_payload;
 };
 
-template <size_t P, op_assoc_e A>
-struct op_unary_base : op_base<op_type_e::UNARY, P, A, 1> {};
-template <size_t P, op_assoc_e A>
-struct op_bin_base : op_base<op_type_e::BINARY, P, A, 2> {};
-template <size_t P, op_assoc_e A>
-struct op_ternary_base : op_base<op_type_e::TERNARY, P, A, 3> {};
-
-struct plusplus_t : op_unary_base<12, op_assoc_e::LEFT> {};
-struct minusminus_t : op_unary_base<12, op_assoc_e::LEFT> {};
-struct plus_t : op_bin_base<8, op_assoc_e::LEFT> {};
-struct minus_t : op_bin_base<8, op_assoc_e::LEFT> {};
-struct mult_t : op_bin_base<9, op_assoc_e::LEFT> {};
-struct div_t : op_bin_base<9, op_assoc_e::LEFT> {};
-struct mod_t : op_bin_base<9, op_assoc_e::LEFT> {};
-VAR_MACRO(arithmetic, plus_t, minus_t, mult_t, div_t, mod_t, plusplus_t,
-          minusminus_t);
-
-struct eq_t : op_bin_base<5, op_assoc_e::LEFT> {};
-struct neq_t : op_bin_base<5, op_assoc_e::LEFT> {};
-struct greater_t : op_bin_base<6, op_assoc_e::LEFT> {};
-struct less_t : op_bin_base<6, op_assoc_e::LEFT> {};
-struct leq_t : op_bin_base<6, op_assoc_e::LEFT> {};
-struct geq_t : op_bin_base<6, op_assoc_e::LEFT> {};
-VAR_MACRO(comparison, eq_t, neq_t, greater_t, less_t, leq_t, geq_t);
-
-struct not_t : op_unary_base<10, op_assoc_e::RIGHT> {};
-struct and_t : op_bin_base<4, op_assoc_e::LEFT> {};
-struct xor_t : op_bin_base<3, op_assoc_e::LEFT> {};
-struct or_t : op_bin_base<2, op_assoc_e::LEFT> {};
-struct sleft_t : op_bin_base<7, op_assoc_e::LEFT> {};
-struct sright_t : op_bin_base<7, op_assoc_e::LEFT> {};
-VAR_MACRO(binary, not_t, and_t, xor_t, or_t, sleft_t, sright_t);
-
-struct assign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
-struct plusassign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
-struct minusassign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
-struct multassign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
-struct divassign_t : op_bin_base<0, op_assoc_e::RIGHT> {};
-VAR_MACRO(assignment, assign_t, plusassign_t, minusassign_t, multassign_t,
-          divassign_t);
-
-struct pipe_t : op_bin_base<1, op_assoc_e::LEFT> {};
-struct neg_t : op_bin_base<11, op_assoc_e::RIGHT> {};
-struct deref_t : op_unary_base<11, op_assoc_e::RIGHT> {};
-struct address_t : op_unary_base<11, op_assoc_e::RIGHT> {};
-struct as_t : op_unary_base<10, op_assoc_e::RIGHT> {
-  sptr<type_t> type;
+// static constexpr auto op_table = std::array<op_t, static_cast<size_t>(op_operation_e::last)>{
+//   op_t{op_operation_e::PLUS, op_type_e::BINARY, op_assoc_e::LEFT, 8},
+//   op_t{op_operation_e::MINUS, op_type_e::BINARY, op_assoc_e::LEFT, 8},
+//   op_t{op_operation_e::MULT, op_type_e::BINARY, op_assoc_e::LEFT, 9},
+//   op_t{op_operation_e::DIV, op_type_e::BINARY, op_assoc_e::LEFT, 9},
+//   op_t{op_operation_e::PLUSPLUS, op_type_e::UNARY, op_assoc_e::LEFT, 12},
+//   op_t{op_operation_e::MINUSMINUS, op_type_e::UNARY, op_assoc_e::LEFT, 12},
+// };
+static constexpr auto op_table = std::array<op_meta_t, static_cast<size_t>(op_operation_e::last)>{
+  // Arithmetic
+  op_meta_t{op_operation_e::PLUS,        op_type_e::BINARY, op_assoc_e::LEFT, 8, false},
+  op_meta_t{op_operation_e::MINUS,       op_type_e::BINARY, op_assoc_e::LEFT, 8, false},
+  op_meta_t{op_operation_e::MULT,        op_type_e::BINARY, op_assoc_e::LEFT, 9, false},
+  op_meta_t{op_operation_e::DIV,         op_type_e::BINARY, op_assoc_e::LEFT, 9, false},
+  op_meta_t{op_operation_e::MOD,         op_type_e::BINARY, op_assoc_e::LEFT, 9, false},
+  op_meta_t{op_operation_e::PLUSPLUS,    op_type_e::UNARY,  op_assoc_e::LEFT, 12, false},
+  op_meta_t{op_operation_e::MINUSMINUS,  op_type_e::UNARY,  op_assoc_e::LEFT, 12, false},
+  // Comparison
+  op_meta_t{op_operation_e::EQ,          op_type_e::BINARY, op_assoc_e::LEFT, 5, false},
+  op_meta_t{op_operation_e::NEQ,         op_type_e::BINARY, op_assoc_e::LEFT, 5, false},
+  op_meta_t{op_operation_e::GREATER,     op_type_e::BINARY, op_assoc_e::LEFT, 6, false},
+  op_meta_t{op_operation_e::LESS,        op_type_e::BINARY, op_assoc_e::LEFT, 6, false},
+  op_meta_t{op_operation_e::LEQ,         op_type_e::BINARY, op_assoc_e::LEFT, 6, false},
+  op_meta_t{op_operation_e::GEQ,         op_type_e::BINARY, op_assoc_e::LEFT, 6, false},
+  // Binary logic & shift
+  op_meta_t{op_operation_e::NOT,         op_type_e::UNARY,  op_assoc_e::RIGHT, 10,false},
+  op_meta_t{op_operation_e::AND,         op_type_e::BINARY, op_assoc_e::LEFT, 4,false},
+  op_meta_t{op_operation_e::XOR,         op_type_e::BINARY, op_assoc_e::LEFT, 3,false},
+  op_meta_t{op_operation_e::OR,          op_type_e::BINARY, op_assoc_e::LEFT, 2,false},
+  op_meta_t{op_operation_e::SLEFT,       op_type_e::BINARY, op_assoc_e::LEFT, 7,false},
+  op_meta_t{op_operation_e::SRIGHT,      op_type_e::BINARY, op_assoc_e::LEFT, 7,false},
+  // Assignment
+  op_meta_t{op_operation_e::ASSIGN,      op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
+  op_meta_t{op_operation_e::PLUSASSIGN,  op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
+  op_meta_t{op_operation_e::MINUSASSIGN, op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
+  op_meta_t{op_operation_e::MULTASSIGN,  op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
+  op_meta_t{op_operation_e::DIVASSIGN,   op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
+  // Misc
+  op_meta_t{op_operation_e::PIPE,        op_type_e::BINARY, op_assoc_e::LEFT, 1, false},
+  op_meta_t{op_operation_e::NEG,         op_type_e::UNARY, op_assoc_e::RIGHT, 11, false}, // Assuming binary for consistency, even though it's typically unary
+  op_meta_t{op_operation_e::DEREF,       op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false},
+  op_meta_t{op_operation_e::ADDRESS,     op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false},
+  op_meta_t{op_operation_e::AS,          op_type_e::UNARY,  op_assoc_e::RIGHT, 10, true},
 };
-VAR_MACRO(operator, pipe_t, neg_t, deref_t, address_t, as_t, assignment_t,
-          binary_t, comparison_t, arithmetic_t);
+
+struct operator_t {
+  struct as_payload_t {
+    sptr<type_t> type;
+  };
+  union payload_t{
+    empty_t empty;
+    as_payload_t as;
+  };
+  op_operation_e type;
+  payload_t payload;
+
+  auto get_as_payload() -> as_payload_t & { return payload.as; }
+
+  const op_meta_t &meta() { return op_table.at(static_cast<size_t>(type)); }
+};
 
 struct number_t {
   std::string_view val;
 };
 
+namespace post {
 struct fncall_t {
   list<sptr<expr_t>> args;
 };
+struct access_t{
+  std::string_view name;
+};
+struct array_access_t{
+  sptr<expr_t> index;
+};
+} // namespace post
 
-struct decl_access_t {
-  sptr<decl_t> decl;
+VAR_MACRO(postfix, post::fncall_t, post::access_t, post::array_access_t);
+struct chain_t {
+  list<sptr<postfix_t>> chain;
 };
 
+struct pipe_t {
+  sptr<expr_t> lhs;
+  opt<chain_t> chain;
+};
 // the parser needs to change to allow different representations
 //  the function one should make basicaly a new locale_t and stmts_t
 //  but anyother should be just an expresion list
@@ -368,22 +481,14 @@ struct result_t {
   // plus whatever a chain has here
 };
 
-struct if_t {
-  struct if_intro_t {
-    sptr<expr_t> ctrl_expr;
-    sptr<stmts_t> stmts;
-  };
-  struct elif_t {
-    sptr<expr_t> ctrl_expr;
-    sptr<stmts_t> stmts;
-  };
-  struct else_t {
-    sptr<stmts_t> stmts;
-  };
 
-  if_intro_t intro;
-  list<elif_t> elifs;
-  std::optional<else_t> el;
+struct if_t {
+  struct if_link_t {
+    sptr<expr_t> ctrl_expr;
+    sptr<stmts_t> stmts;
+  };
+  //we could change this to a static array
+  list<if_link_t> ifs;
 };
 
 // chain like
@@ -396,9 +501,14 @@ struct decl_ref_t {
   sptr<decl_t> decl;
 };
 
-VAR_MACRO(operand, unresolved_t, decl_ref_t, fn_lit_t, if_t, complit_t,
-          fncall_t, number_t, sizeof_t, decl_access_t, result_t);
-using var = var<empty_t, operator_t, operand_t>;
+struct subexpr_t {
+  ssptr<subexpr_t, expr_elm_t> prev;
+  sptr<expr_t> expr;
+};
+
+VAR_MACRO(operand, unresolved_t,  decl_ref_t, fn_lit_t, if_t, complit_t,
+          number_t, sizeof_t, result_t);
+using var = var<empty_t, subexpr_t, unresolved_t, operator_t, operand_t>;
 } // namespace expr_s
 struct expr_elm_t : public expr_s::var {
   using expr_s::var::variant;
@@ -408,7 +518,6 @@ struct expr_t {
 };
 
 namespace stmt_s {
-
 struct unwrap_decl_arr_t {
   list<sptr<decl_t>> wraps;
 };
@@ -439,6 +548,7 @@ struct stmts_t {
 };
 
 struct locale_t {
+
   using val_t = sptr<decl_t>;
   using entry_t = val_t;
   using map_entry_t = std::tuple<std::string_view, val_t>;
@@ -460,6 +570,7 @@ struct locale_t {
     size_t size() const { return path.size(); }
     void clear() { path.clear(); }
   };
+
   struct insert_t {
     bool inserted;
     std::string_view name;
@@ -479,12 +590,12 @@ struct locale_t {
   };
 
   sptr<locale_t> parent_;
-  list<sptr<locale_t>> children_;
+  // list<sptr<locale_t>> children_;
 
   // general
   static sptr<locale_t> make_child(auto &ctx, sptr<locale_t> self) {
     auto ptr = ctx.make_sptr(locale_t{self, {}});
-    self->children_.push_back(ptr);
+    // self->children_.push_back(ptr);
     return ptr;
   }
 
@@ -493,13 +604,37 @@ struct locale_t {
   // implementation specific
   struct internal {
     std::unordered_map<std::string_view, entry_t> table = {};
+    mutable std::mutex mutex = {};
+
+    internal() = default;
+
+    // Custom copy constructor
+    internal(const internal &other) : table(other.table) {
+      // mutex is default-constructed, not copied
+    }
+
+    // Custom copy assignment operator
+    internal &operator=(const internal &other) {
+      if (this != &other) {
+        table = other.table;
+        // mutex remains default
+      }
+      return *this;
+    }
     static lookup_t ancestor_lookup(sptr<locale_t> self, path_t &path,
                                     const std::string_view name) {
-      return lookup<false>(self, path, name);
+      self->internals.mutex.lock();
+      auto val = lookup<false>(self, path, name);
+      self->internals.mutex.unlock();
+      return val;
     }
     static lookup_t local_lookup(sptr<locale_t> self, path_t &path,
                                  const std::string_view name) {
-      return lookup<true>(self, path, name);
+      self->internals.mutex.lock();
+      auto val = lookup<true>(self, path, name);
+      self->internals.mutex.unlock();
+      return val;
+
     }
     template <bool is_local_search>
     static lookup_t lookup(sptr<locale_t> &self, path_t &path,
@@ -518,14 +653,32 @@ struct locale_t {
     }
 
     insert_t try_insert(std::string_view name, entry_t &&val) {
+      mutex.lock();
       auto res = table.try_emplace(name, std::forward<entry_t>(val));
+      mutex.unlock();
+      return {res.second, name, res.first->second};
+    }
+    insert_t try_insert(std::string_view name, entry_t &val) {
+      mutex.lock();
+      auto res = table.try_emplace(name, val);
+      mutex.unlock();
       return {res.second, name, res.first->second};
     }
   } internals;
 
+  insert_t try_insert(std::string name, entry_t &&val) {
+    return internals.try_insert(name, std::forward<entry_t>(val));
+  }
   insert_t try_insert(std::string_view name, entry_t &&val) {
     return internals.try_insert(name, std::forward<entry_t>(val));
   }
+  insert_t try_insert(std::string name, entry_t &val) {
+    return internals.try_insert(name, std::forward<entry_t>(val));
+  }
+  insert_t try_insert(std::string_view name, entry_t &val) {
+    return internals.try_insert(name, std::forward<entry_t>(val));
+  }
+
   static lookup_t ancestor_lookup(sptr<locale_t> self,
                                   const std::string_view name) {
     path_t path;
@@ -550,30 +703,32 @@ struct locale_t {
 
     if (!lookup.found || !std::holds_alternative<VAR_TYPE>(*lookup.symbol))
       return ret_type{false, std::move(lookup.path), sptr<decl_t>{}};
-
     return ret_type{true, std::move(lookup.path), lookup.symbol};
   }
 };
 
 struct resolve_callback_t {
-  template <typename Y, typename T> struct call_t {
+  template <typename Y, typename T> struct unresolved_call_t {
     ssptr<Y, T> ptr;
     std::function<void(ssptr<Y, T>)> call;
     void operator()() { call(ptr); }
   };
 
-  var<call_t<unresolved_t, type_t>, call_t<decl_s::unresolved_t, decl_t>> call;
+  var<unresolved_call_t<unresolved_t, type_t>,
+      unresolved_call_t<decl_s::unresolved_t, decl_t>,
+      unresolved_call_t<unresolved_t, expr_elm_t>>
+      call;
 
   template <typename Y, typename T>
   auto get_ptr() -> opt<std::reference_wrapper<sptr<T>>> {
-    if (rholds<call_t<Y, T>>(call))
-      return std::get<call_t<Y, T>>(call).ptr;
+    if (rholds<unresolved_call_t<Y, T>>(call))
+      return std::get<unresolved_call_t<Y, T>>(call).ptr;
     return std::nullopt;
   }
   template <typename Y, typename T>
-  auto get_callback_obj() -> opt<std::reference_wrapper<call_t<Y, T>>> {
-    if (rholds<call_t<Y, T>>(call))
-      return std::get<call_t<Y, T>>(call);
+  auto get_callback_obj() -> opt<std::reference_wrapper<unresolved_call_t<Y, T>>> {
+    if (rholds<unresolved_call_t<Y, T>>(call))
+      return std::get<unresolved_call_t<Y, T>>(call);
     return std::nullopt;
   }
   void operator()() {
@@ -587,36 +742,27 @@ struct resolve_callback_t {
 
 struct context_t {
   const token_buffer_t &toks;
-  size_t cindex;
+  const std::map<size_t, size_t> &toks_symetrical_map;
+  std::atomic_uint64_t cindex;
+
   allocator_t &allocator;
+  std::map<uintptr_t, resolve_callback_t> callback_map;
+  std::mutex mut;
 
-  std::map<uintptr_t, resolve_callback_t> callback_map = {};
-
-#ifdef SEMANTICS_DEBUG
-  struct callstack_entry_t {
-    std::string function;
-    std::string file;
-    int line;
-  };
-  list<callstack_entry_t> dbg_callstack = {};
-#endif
-
-  void
-  dbg_add_call(std::source_location loc = std::source_location::current()) {
-#ifdef SEMANTICS_DEBUG
-    dbg_callstack.push_back(
-        {loc.function_name(), loc.file_name(), static_cast<int>(loc.line())});
-#endif
-  }
+  context_t(const token_buffer_t &t, const std::map<size_t, size_t> &tsm, allocator_t &a)
+      : toks(t), toks_symetrical_map(tsm), cindex(0), allocator(a),
+        callback_map({}), mut() {}
 
   template <typename T> void insert_callback(sptr<T> ptr, auto callback) {
+    mut.lock();
     callback_map.insert({(uintptr_t)ptr.get_ptr(), callback});
+    mut.unlock();
   }
 
-  auto insert_call() {}
+  context_t(const context_t &) = delete;
+  context_t &operator=(const context_t &) = delete;
 
   size_t operator++() { return cindex++; }
-  static std::size_t size;
 
   template <typename T, typename... Args>
   auto make_sptr(Args &&...val) -> sptr<T> {
@@ -628,235 +774,105 @@ struct context_t {
   template <typename T> auto make_sptr(T &val) -> sptr<T> {
     return make_ptr<T>(allocator, val);
   }
+  template <typename S, typename B> auto make_ssptr(S &val) -> ssptr<S, B> {
+    return make_ptr<B>(allocator, val);
+  }
+  template <typename S, typename B> auto make_ssptr(S &&val) -> ssptr<S, B> {
+    return make_ptr<B>(allocator, val);
+  }
 };
 
 
-struct cursor_helper_t {
-  cursor_helper_t(const span_t s) : span_(s), cursor_(s.begin()) {}
-
-  template <auto in = medianc::any, typename in_t = decltype(in),
-            typename t = std::conditional_t<std::is_same_v<in_t, medianc::e>,
-                                            median_t, final_t>>
-  std::optional<t> extract() {
-    static_assert(std::is_same_v<in_t, medianc::e> ||
-                      std::is_same_v<in_t, tokc::e>,
-                  "in must be a medianc::e or a tokc::e");
-
-    if (!within() || !std::holds_alternative<t>(cursor_->node()))
-      return std::nullopt;
-
-    if constexpr (std::is_same_v<t, median_t>) {
-      const auto med = cursor_->as_median();
-      if constexpr (in == medianc::any) {
-        cursor_.advance();
-        return med;
-      } else {
-        if (med.type() == in) {
-          cursor_.advance();
-          return med;
-        }
-      }
-    } else if constexpr (std::is_same_v<t, final_t>) {
-      const auto fin = cursor_->as_final();
-      if constexpr (in == tokc::any) {
-        cursor_.advance();
-        return fin;
-      } else {
-        if (fin->isa(in)) {
-          cursor_.advance();
-          return fin;
-        }
-      }
-    } else {
-      static_assert(false, "input is neither a medianc::e or a tokc::e");
-    }
-    return std::nullopt;
-  }
-
-  template <size_t index, size_t max, auto in, auto... ins>
-  auto tuple_extract_impl(auto &tup) -> void {
-    if constexpr (index < max) {
-      std::get<index>(tup) = extract<in>();
-      if constexpr (sizeof...(ins) > 0) {
-        return tuple_extract_impl<index + 1, max, ins...>(tup);
-      }
-    }
-  }
-  template <
-      auto... ins,
-      typename ret = std::tuple<std::optional<std::conditional_t<
-          std::is_same_v<decltype(ins), medianc::e>, median_t, final_t>>...>>
-  auto tuple_extract() -> ret {
-    ret tup;
-    tuple_extract_impl<0, sizeof...(ins), ins...>(tup);
-    return tup;
-  }
-
-  bool within() const { return span_.contains(cursor_); }
-
-private:
-  span_t span_;
-  cursor_t cursor_;
-};
 namespace symbols {
+
+auto rec2tup(context_t &ctx, sptr<type_t> type) -> sptr<type_t> {
+  auto &rec =
+      std::get<type_s::rec_t>(std::get<type_s::aggregate_t>(type.get_val()));
+
+  auto newptr = ctx.make_sptr<type_t>(type_s::aggregate_t{type_s::tup_t{}});
+  auto &tup =
+      std::get<type_s::tup_t>(std::get<type_s::aggregate_t>(newptr.get_val()));
+
+  for (auto &elm : rec.members) {
+    if (!holds<decl_s::var_decl_t>(elm.get_val()))
+      throw std::runtime_error("Can't convert rec to tup");
+
+    auto &decl = std::get<decl_s::var_decl_t>(elm.get_val());
+    if (decl.type.is_null())
+      throw std::runtime_error("This shouldn't be here");
+
+    tup.types.push_back(decl.type);
+  }
+  return newptr;
+}
+auto tup2rec(context_t &ctx, const sptr<type_t> type) -> sptr<type_t> {
+  const auto &tup =
+      std::get<type_s::tup_t>(std::get<type_s::aggregate_t>(type.get_val()));
+  auto newptr = ctx.make_sptr<type_t>(type_s::aggregate_t{type_s::rec_t{}});
+
+  auto &rec =
+      std::get<type_s::rec_t>(std::get<type_s::aggregate_t>(newptr.get_val()));
+
+  size_t n = 0;
+  auto num2name = [](const size_t n) -> std::string {return "_" + std::to_string(n);};
+
+  for (auto &elm : tup.types) {
+    const auto id = n;
+    const auto name = num2name(n++);
+    auto ptr =
+        ctx.make_sptr<decl_t>(decl_s::var_decl_t{true, elm, nullptr}, name, id);
+    rec.loc->try_insert(name, ptr);
+    rec.members.push_back(ptr);
+  }
+  return newptr;
+}
+auto indirection_get_final(ssptr<type_s::indirection_t, type_t> ptr)
+    -> sptr<type_t> {
+  auto &ref = ptr.get();
+  return ovisit(
+      ref, [&](type_s::optr_t &val) -> sptr<type_t> { return ptr.ptr(); },
+      [](auto &val) -> sptr<type_t> {
+        // ptr, iptr
+        return ovisit(
+            val.type.get_val(),
+            [&](type_s::indirection_t &) -> sptr<type_t> {
+              return indirection_get_final(val.type);
+            },
+            [&](auto &) { return val.type; });
+      });
+}
+
+auto typeref_get_final(ssptr<type_s::type_ref_t, type_t> ptr) -> sptr<type_t>{
+  auto& ref = ptr.get().ref;
+  if (holds<type_s::type_ref_t>(ptr.get().ref.get_val())) 
+    return typeref_get_final(ref);
+  return ref;
+}
+template <typename Q>
+auto typeref_holds(const ssptr<type_s::type_ref_t, type_t> ptr) -> bool {
+  return holds<Q>(typeref_get_final(ptr));
+}
+
 auto entry(allocator_t &allocator, const token_buffer_t &toks,
+           const std::map<size_t, size_t> &toks_symetrical_map,
            grammar::node_t &root_node)
     -> std::tuple<sptr<locale_t>, sptr<stmts_t>>;
+// auto entry(allocator_t &allocator, const token_buffer_t &toks,
+//            grammar::node_t &root_node)
+//     -> std::tuple<sptr<locale_t>, sptr<stmts_t>>;
 }
 
+void print(sptr<decl_t> &val, const size_t indent = 0);
+void print(sptr<type_t> &val, const size_t indent = 0);
+void print(sptr<expr_elm_t> &val, const size_t indent = 0);
+void print(sptr<expr_t> &val, const size_t indent = 0);
+void print(sptr<stmt_t> &val, const size_t indent = 0);
+void print(sptr<stmts_t> &val, const size_t indent = 0);
+void print(sptr<type_s::fnsig_t>&val, const size_t indent = 0);
 
-#define instr std::string(indent*3, ' ')
-#define inprint(next) std::print("{}",instr);next
-#define printvar std::println("{}",boost::core::demangled_name(typeid(val)))
-#define deflam  [&](auto& val){inprint({}); std::cout << "Unknown type: " << boost::core::demangled_name(typeid(val)) << std::endl;}
-
-void print(sptr<decl_t> &val, size_t indent = 0);
-void print(sptr<type_t> &val, size_t indent = 0);
-void print(sptr<expr_elm_t> &val, size_t indent = 0);
-void print(sptr<expr_t> &val, size_t indent = 0);
-void print(sptr<stmt_t> &val, size_t indent = 0);
-void print(sptr<stmts_t> &val, size_t indent = 0);
-void print(sptr<type_s::fnsig_t>&val, size_t indent = 0);
-void print(sptr<type_s::fnsig_t>&val, size_t indent){
-  inprint(printvar);
-  inprint(std::println("{}", (void*)val.get_ptr()));
-
-  if(val->ret_type)
-    print(val->ret_type, indent + 1);
-  if(val->template_args){
-    for (auto &elm : val->template_args->args) {
-      ovisit(elm, [&](auto &val) { print(val.ptr(), indent + 1); });
-    }
-  }
-}
-void print(sptr<decl_t> &val, size_t indent) {
-  inprint(printvar);
-  inprint(std::println("{}", (void*)val.get_ptr()));
-  inprint(std::println("name: {}", val->name));
-  inprint(std::println("dindex: {}", val->dindex));
-  ovisit(
-      val.get_val(),
-      [&indent](decl_s::var_decl_t &val) {
-        inprint(printvar);
-        if (val.type)
-          print(val.type, indent + 1);
-        if (val.expr)
-          print(val.expr, indent + 1);
-      },
-      [&indent](decl_s::type_decl_t &val) {
-        inprint(printvar);
-        if(val.type)
-          print(val.type, indent + 1);
-      },
-      [&indent](decl_s::scope_decl_t &val) {
-        inprint(printvar);
-        print(val.stmts, indent + 1);
-      },
-      [&indent](decl_s::fn_decl_t &val) {
-        inprint(printvar);
-        if(val.sig.ptr())
-          print(val.sig.ptr(), indent + 1);
-        if(val.body)
-          print(val.body, indent + 1);
-      },
-      [&indent](decl_s::unwrap_decl_elm_t &val) {
-        inprint(printvar);
-        inprint(std::println("index: {}",val.index));
-      },
-      [&indent](decl_s::template_var_input_t &val) {
-        inprint(printvar);
-      },
-      [&indent](decl_s::template_type_input_t &val) {
-        inprint(printvar);
-      },
-      [&indent](unresolved_t &val) {
-        inprint(printvar);
-      },
-      deflam);
-}
-
-void print(sptr<type_t> &val, size_t indent) {
-  inprint(printvar);
-  inprint(std::println("{}", (void *)val.get_ptr()));
-
-  ovisit(val.get_val(),
-      [&indent](type_s::type_ref_t &val) {
-        inprint(printvar);
-        inprint(std::println("ref:{}", (void *)val.ref.get_ptr()));
-      },
-      [&indent](type_s::primitive_t &val) {
-        inprint(printvar);
-        ovisit(val,
-            [&indent](type_s::numeric_t &val) {
-              inprint(printvar);
-              ovisit(val, [&indent](auto &val) {
-                inprint(printvar);
-                inprint(std::println("size:{}", val.size));
-              });
-            },
-            deflam);
-      },
-      [&indent](type_s::aggregate_t &val) {
-        inprint(printvar);
-        ovisit(val,
-            [&indent](type_s::rec_t &val) {
-              inprint(printvar);
-              for (auto &elm : val.members)
-                print(elm, indent + 1);
-            },
-            [&indent](type_s::tup_t &val) {
-              inprint(printvar);
-              for (auto &elm : val.types)
-                print(elm, indent + 1);
-            });
-      },
-      deflam);
-}
-
-void print(sptr<expr_elm_t> &val, size_t indent) {
-  inprint(printvar);
-  inprint(std::println("{}", (void*)val.get_ptr()));
-
-  ovisit(val.get_val(),
-         deflam);
-}
-
-void print(sptr<expr_t> &val, size_t indent) {
-  inprint(printvar);
-  inprint(std::println("{}", (void*)val.get_ptr()));
-  for (auto &elm : val->exprs)
-    print(elm, indent + 1);
-}
-
-void print(sptr<stmt_t> &val, size_t indent) { 
-  inprint(printvar);
-  inprint(std::println("{}", (void*)val.get_ptr()));
-  ovisit(
-      val.get_val(),
-      [&indent](stmt_s::import_t &val) {
-        inprint(printvar);
-        inprint(std::println("{}", val.file));
-      },
-      [&indent](stmt_s::ret_t &val) {
-        inprint(printvar);
-        print(val.expr,indent + 1);
-      },
-      [&indent](stmt_s::forloop_t &val) { inprint(printvar); },
-      [&indent](stmt_s::unwrap_decl_arr_t &val) {
-        inprint(printvar);
-        for (auto &elm : val.wraps) {
-          print(elm, indent + 1);
-        }
-      },
-      [&indent](sptr<decl_t> &val) { print(val, indent + 1); },
-      [&indent](sptr<expr_t> &val) { print(val, indent + 1); }, deflam);
-}
-
-void print(sptr<stmts_t> &val, size_t indent) {
-  inprint(printvar);
-  inprint(std::println("{}", (void*)val.get_ptr()));
-  for (auto &elm : val->stmts)
-    print(elm, indent + 1);
-}
+struct template_init_list_t {
+  using template_elm_t = var<sptr<type_t>, sptr<expr_t>>;
+  list<template_elm_t> list;
+};
 
 } // namespace semantics

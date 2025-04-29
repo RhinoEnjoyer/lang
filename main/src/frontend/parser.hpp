@@ -5,7 +5,6 @@
 
 #include <array>
 #include <map>
-// #include <type_traits>
 #include <variant>
 
 namespace grammar {
@@ -298,17 +297,6 @@ struct node_t {
   [[nodiscard]] auto is_err() const noexcept -> bool {
     return std::holds_alternative<err_t>(node_);
   }
-
-  // template <typename T> [[nodiscard]] auto as_checked() -> auto {
-  //   if (!std::holds_alternative<T>(node_))
-  //     throw std::runtime_error("Node does not hold the expected type");
-  //   return this->as<T>();
-  // }
-
-  // template <typename T> [[nodiscard]] auto as_checked() const -> const auto {
-  //   return as_checked<T>();
-  // }
-
   [[nodiscard]] static auto make(cursor_t cursor) -> node_t {
     return node_t{final_t(cursor)};
   }
@@ -326,7 +314,6 @@ struct context_t {
   const std::map<size_t, size_t> &smap;
   node_buffer_t &nodes;
 };
-
 
 auto entry(const token_buffer_t &toks, const std::map<size_t, size_t> &smap,
            cursor_t cursor, const cursor_t end) -> parser_out;
