@@ -271,7 +271,16 @@ struct closure_t {
   sptr<locale_t> get_locale() { return sig->get_locale(); }
 };
 
-VAR_MACRO(callable, fn_t, closure_t);
+using callable_var = var<fn_t, closure_t>;
+struct callable_t : public callable_var {
+  using callable_var ::variant;
+  using callable_var ::operator=;
+  sptr<locale_t> get_locale() { 
+
+    return ovisit(*this, [](auto& val) -> sptr<locale_t> {return val.get_locale();});
+  }
+
+};
 
 struct infered_t {};
 
@@ -747,11 +756,19 @@ struct context_t {
 
   allocator_t &allocator;
   std::map<uintptr_t, resolve_callback_t> callback_map;
+
+  using post_resolve_callback_t = std::function<void()>;
+  list<post_resolve_callback_t> post_resolve_callbacks;
+  //not needed?
   std::mutex mut;
 
   context_t(const token_buffer_t &t, const std::map<size_t, size_t> &tsm, allocator_t &a)
       : toks(t), toks_symetrical_map(tsm), cindex(0), allocator(a),
         callback_map({}), mut() {}
+
+  void push_post_callback(post_resolve_callback_t callback) {
+    post_resolve_callbacks.push_back(callback);
+  }
 
   template <typename T> void insert_callback(sptr<T> ptr, auto callback) {
     mut.lock();
@@ -782,85 +799,12 @@ struct context_t {
   }
 };
 
-
 namespace symbols {
-
-auto rec2tup(context_t &ctx, sptr<type_t> type) -> sptr<type_t> {
-  auto &rec =
-      std::get<type_s::rec_t>(std::get<type_s::aggregate_t>(type.get_val()));
-
-  auto newptr = ctx.make_sptr<type_t>(type_s::aggregate_t{type_s::tup_t{}});
-  auto &tup =
-      std::get<type_s::tup_t>(std::get<type_s::aggregate_t>(newptr.get_val()));
-
-  for (auto &elm : rec.members) {
-    if (!holds<decl_s::var_decl_t>(elm.get_val()))
-      throw std::runtime_error("Can't convert rec to tup");
-
-    auto &decl = std::get<decl_s::var_decl_t>(elm.get_val());
-    if (decl.type.is_null())
-      throw std::runtime_error("This shouldn't be here");
-
-    tup.types.push_back(decl.type);
-  }
-  return newptr;
-}
-auto tup2rec(context_t &ctx, const sptr<type_t> type) -> sptr<type_t> {
-  const auto &tup =
-      std::get<type_s::tup_t>(std::get<type_s::aggregate_t>(type.get_val()));
-  auto newptr = ctx.make_sptr<type_t>(type_s::aggregate_t{type_s::rec_t{}});
-
-  auto &rec =
-      std::get<type_s::rec_t>(std::get<type_s::aggregate_t>(newptr.get_val()));
-
-  size_t n = 0;
-  auto num2name = [](const size_t n) -> std::string {return "_" + std::to_string(n);};
-
-  for (auto &elm : tup.types) {
-    const auto id = n;
-    const auto name = num2name(n++);
-    auto ptr =
-        ctx.make_sptr<decl_t>(decl_s::var_decl_t{true, elm, nullptr}, name, id);
-    rec.loc->try_insert(name, ptr);
-    rec.members.push_back(ptr);
-  }
-  return newptr;
-}
-auto indirection_get_final(ssptr<type_s::indirection_t, type_t> ptr)
-    -> sptr<type_t> {
-  auto &ref = ptr.get();
-  return ovisit(
-      ref, [&](type_s::optr_t &val) -> sptr<type_t> { return ptr.ptr(); },
-      [](auto &val) -> sptr<type_t> {
-        // ptr, iptr
-        return ovisit(
-            val.type.get_val(),
-            [&](type_s::indirection_t &) -> sptr<type_t> {
-              return indirection_get_final(val.type);
-            },
-            [&](auto &) { return val.type; });
-      });
-}
-
-auto typeref_get_final(ssptr<type_s::type_ref_t, type_t> ptr) -> sptr<type_t>{
-  auto& ref = ptr.get().ref;
-  if (holds<type_s::type_ref_t>(ptr.get().ref.get_val())) 
-    return typeref_get_final(ref);
-  return ref;
-}
-template <typename Q>
-auto typeref_holds(const ssptr<type_s::type_ref_t, type_t> ptr) -> bool {
-  return holds<Q>(typeref_get_final(ptr));
-}
-
 auto entry(allocator_t &allocator, const token_buffer_t &toks,
            const std::map<size_t, size_t> &toks_symetrical_map,
            grammar::node_t &root_node)
     -> std::tuple<sptr<locale_t>, sptr<stmts_t>>;
-// auto entry(allocator_t &allocator, const token_buffer_t &toks,
-//            grammar::node_t &root_node)
-//     -> std::tuple<sptr<locale_t>, sptr<stmts_t>>;
-}
+} // namespace symbols
 
 void print(sptr<decl_t> &val, const size_t indent = 0);
 void print(sptr<type_t> &val, const size_t indent = 0);

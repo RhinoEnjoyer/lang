@@ -330,12 +330,11 @@ AGAIN:
   // TABLE 3
   // and this one
   if (pos < src.size() &&
-      LLVM_UNLIKELY(
-          !whitespace_table[src[pos]] && !symbol_sequence_bytes[src[pos]] &&
-          src[pos] != ';' &&
-          !symetrical_close_table_bool[src[pos]] // This used to be
-                                                 // symetrical_table_bool
-          ))
+      !whitespace_table[src[pos]] && !symbol_sequence_bytes[src[pos]] &&
+      src[pos] != ';' &&
+      !symetrical_close_table_bool[src[pos]] // This used to be
+                                             // symetrical_table_bool
+      ) [[unlikely]]
     err("Invalid following symbol after a number ", DISPATCH_ARGS);
 
   lexer.push(type, bpos, pos);
@@ -357,6 +356,7 @@ auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   auto subbegin = text.begin();
   auto len = text.size();
 #define TOKEN_SYMBOL_SEQUENCE(spelling, code) .Case(spelling, tokc::e::code)
+
 
   // A smarter person would make sure to make distinctions for the tokens that
   // can only have one char. That person ain't me.

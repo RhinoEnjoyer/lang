@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <iostream>
 #include <ostream>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -280,19 +281,87 @@ void print(sptr<stmts_t> &val, const size_t indent) {
 #undef printvar
 #undef deflam
 
+
+namespace expr_s {
+auto token_to_operator(const tokc::e token) -> operator_t {
+  using enum op_operation_e; // for cleaner syntax
+  switch (token) {
+  case tokc::EQUALS:          return {EQ,         {empty_t{}}};
+  case tokc::GEQUALS:         return {GEQ,        {empty_t{}}};
+  case tokc::LEQUALS:         return {LEQ,        {empty_t{}}};
+  case tokc::EMARKEQUALS:     return {NEQ,        {empty_t{}}};
+  case tokc::PLUSASIGN:       return {PLUSASSIGN, {empty_t{}}};
+  case tokc::MINUSASIGN:      return {MINUSASSIGN,{empty_t{}}};
+  case tokc::DIVASIGN:        return {DIVASSIGN,  {empty_t{}}};
+  case tokc::MULASIGN:        return {MULTASSIGN, {empty_t{}}};
+  case tokc::ASIGN:           return {ASSIGN,     {empty_t{}}};
+  case tokc::PLUSPLUS:        return {PLUSPLUS,   {empty_t{}}};
+  case tokc::MINUSMINUS:      return {MINUSMINUS, {empty_t{}}};
+  case tokc::GREATERGREATER:  return {SRIGHT,     {empty_t{}}};
+  case tokc::LESSLESS:        return {SLEFT,      {empty_t{}}};
+  case tokc::LESSGREATER:     return {NEQ,        {empty_t{}}};
+  case tokc::XOR:             return {XOR,        {empty_t{}}};
+  case tokc::AND:             return {AND,        {empty_t{}}};
+  case tokc::OR:              return {OR,         {empty_t{}}};
+  case tokc::MODULO:          return {MOD,        {empty_t{}}};
+  case tokc::PLUS:            return {PLUS,       {empty_t{}}};
+  case tokc::MINUS:           return {MINUS,      {empty_t{}}};
+  case tokc::DIV:             return {DIV,        {empty_t{}}};
+  case tokc::MUL:             return {MULT,       {empty_t{}}};
+  case tokc::LESS:            return {LESS,       {empty_t{}}};
+  case tokc::GREATER:         return {GREATER,    {empty_t{}}};
+  case tokc::EMARK:           return {NOT,        {empty_t{}}};
+  case tokc::PERISPOMENI:     return {DEREF,      {empty_t{}}};
+  case tokc::AMPERSAND:       return {ADDRESS,    {empty_t{}}};
+  case tokc::ANDASIGN:        return {ASSIGN,     {empty_t{}}};
+  case tokc::ORASIGN:         return {ASSIGN,     {empty_t{}}};
+  case tokc::MINUSGREATER:    return {PIPE,       {empty_t{}}};
+  default:
+    std::unreachable();
+  }
+}
+} // namespace expr_s
+
+namespace resolve {
+auto type_fn(context_t &ctx, sptr<locale_t> locale,
+             ssptr<unresolved_t, type_t> ptr) -> resolve_callback_t;
+auto decl_fn(context_t &ctx, sptr<locale_t> locale,
+             ssptr<decl_s::unresolved_t, decl_t> ptr) -> resolve_callback_t;
+auto expr_elm_fn(context_t &ctx, sptr<locale_t> locale,
+             ssptr<unresolved_t, expr_elm_t> ptr) -> resolve_callback_t;
+} // namespace resolve
+
+namespace symbols {
+
+auto consume_stmts_fn(context_t &ctx, sptr<locale_t> loc, sptr<stmts_t> stmts,
+                      span_t span) -> void;
+auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
+    -> sptr<type_t>;
+auto decl_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
+    -> sptr<decl_t>;
+auto expr_val_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
+    -> expr_t;
+auto expr_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
+    -> sptr<expr_t>;
+template <void (*fn)(sptr<decl_t>, context_t &, sptr<locale_t>,
+                     cursor_helper_t &)>
+auto decl_spec_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
+    -> sptr<decl_t>;
+auto type_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
+                  cursor_helper_t &cursor) -> void;
+template <bool allow_init_val = true>
+auto var_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
+                 cursor_helper_t &cursor) -> void;
+auto todo_stmts_fn(context_t &ctx, sptr<locale_t> loc, const median_t stmt_med)
+    -> sptr<stmt_t> {
+  throw std::runtime_error(std::string(__func__) + " todo function");
+}
+
+
 struct deepcopy_t {
   using entry_ptr_t =
-      varptr<
-        locale_t, 
-        decl_t, 
-        type_s::template_args_t, 
-        type_s::fnsig_t, 
-        type_t,
-        expr_elm_t, 
-        expr_t, 
-        stmt_t, 
-        stmts_t
-      >;
+      varptr<locale_t, decl_t, type_s::template_args_t, type_s::fnsig_t, type_t,
+             expr_elm_t, expr_t, stmt_t, stmts_t>;
 
   struct entry_t {
     entry_ptr_t newptr;
@@ -322,10 +391,14 @@ struct deepcopy_t {
     insert_val = create_entry(query_val);
     insert2map(query_val);
 
-    if constexpr (INDEX+1 >= END)
+    if constexpr (INDEX + 1 >= END)
       return;
     else
       return tuple_copy<INDEX + 1, END, T...>(query_tup, insert_tup);
+  }
+  auto force_copy() {
+    for (auto &elm : map)
+      ovisit(elm.second.newptr.ptr, [this](auto &val) { this->replace(val); });
   }
   template <typename... T>
   auto copy(std::tuple<sptr<T>...> query_tup) -> std::tuple<sptr<T>...> {
@@ -338,7 +411,7 @@ struct deepcopy_t {
 
     return insert_tup;
   }
-  template <typename T> sptr<T> lookup(sptr<T> ptr) {
+  template <typename T> sptr<T> lookup(const sptr<T> ptr) {
     auto find = map.find((uintptr_t)(ptr.get_ptr()));
     if (find != map.end())
       return find->second.newptr.to_sptr<T>();
@@ -391,8 +464,7 @@ struct deepcopy_t {
   void insert2map(decl_s::unwrap_decl_elm_t &val) { insert2map(val.init_val); }
   void insert2map(decl_t &val) {
     ovisit(
-        val, 
-        [this](decl_s::scope_decl_t &val) { insert2map(val); },
+        val, [this](decl_s::scope_decl_t &val) { insert2map(val); },
         [this](decl_s::var_decl_t &val) { insert2map(val); },
         [this](decl_s::type_decl_t &val) { insert2map(val); },
         [this](decl_s::fn_decl_t &val) { insert2map(val); },
@@ -433,8 +505,7 @@ struct deepcopy_t {
   void insert2map(type_s::indirection_t &val) {
     // deepcopy because it is better to do so
     ovisit(
-        val, 
-        [this](type_s::ptr_t &val) { insert2map(val.type); },
+        val, [this](type_s::ptr_t &val) { insert2map(val.type); },
         [this](type_s::iptr_t &val) { insert2map(val.type); },
         [](type_s::optr_t &val) {});
   }
@@ -661,79 +732,126 @@ struct deepcopy_t {
   }
 };
 
-namespace expr_s {
-auto token_to_operator(const tokc::e token) -> operator_t {
-  using enum op_operation_e; // for cleaner syntax
-  switch (token) {
-  case tokc::EQUALS:          return {EQ,         {empty_t{}}};
-  case tokc::GEQUALS:         return {GEQ,        {empty_t{}}};
-  case tokc::LEQUALS:         return {LEQ,        {empty_t{}}};
-  case tokc::EMARKEQUALS:     return {NEQ,        {empty_t{}}};
-  case tokc::PLUSASIGN:       return {PLUSASSIGN, {empty_t{}}};
-  case tokc::MINUSASIGN:      return {MINUSASSIGN,{empty_t{}}};
-  case tokc::DIVASIGN:        return {DIVASSIGN,  {empty_t{}}};
-  case tokc::MULASIGN:        return {MULTASSIGN, {empty_t{}}};
-  case tokc::ASIGN:           return {ASSIGN,     {empty_t{}}};
-  case tokc::PLUSPLUS:        return {PLUSPLUS,   {empty_t{}}};
-  case tokc::MINUSMINUS:      return {MINUSMINUS, {empty_t{}}};
-  case tokc::GREATERGREATER:  return {SRIGHT,     {empty_t{}}};
-  case tokc::LESSLESS:        return {SLEFT,      {empty_t{}}};
-  case tokc::LESSGREATER:     return {NEQ,        {empty_t{}}};
-  case tokc::XOR:             return {XOR,        {empty_t{}}};
-  case tokc::AND:             return {AND,        {empty_t{}}};
-  case tokc::OR:              return {OR,         {empty_t{}}};
-  case tokc::MODULO:          return {MOD,        {empty_t{}}};
-  case tokc::PLUS:            return {PLUS,       {empty_t{}}};
-  case tokc::MINUS:           return {MINUS,      {empty_t{}}};
-  case tokc::DIV:             return {DIV,        {empty_t{}}};
-  case tokc::MUL:             return {MULT,       {empty_t{}}};
-  case tokc::LESS:            return {LESS,       {empty_t{}}};
-  case tokc::GREATER:         return {GREATER,    {empty_t{}}};
-  case tokc::EMARK:           return {NOT,        {empty_t{}}};
-  case tokc::PERISPOMENI:     return {DEREF,      {empty_t{}}};
-  case tokc::AMPERSAND:       return {ADDRESS,    {empty_t{}}};
-  case tokc::ANDASIGN:        return {ASSIGN,     {empty_t{}}};
-  case tokc::ORASIGN:         return {ASSIGN,     {empty_t{}}};
-  case tokc::MINUSGREATER:    return {PIPE,       {empty_t{}}};
-  default:
-    std::unreachable();
+auto rec2tup(context_t &ctx, sptr<type_t> type) -> sptr<type_t> {
+  auto &rec =
+      std::get<type_s::rec_t>(std::get<type_s::aggregate_t>(type.get_val()));
+
+  auto newptr = ctx.make_sptr<type_t>(type_s::aggregate_t{type_s::tup_t{}});
+  auto &tup =
+      std::get<type_s::tup_t>(std::get<type_s::aggregate_t>(newptr.get_val()));
+
+  for (auto &elm : rec.members) {
+    if (!holds<decl_s::var_decl_t>(elm.get_val()))
+      throw std::runtime_error("Can't convert rec to tup");
+
+    auto &decl = std::get<decl_s::var_decl_t>(elm.get_val());
+    if (decl.type.is_null())
+      throw std::runtime_error("This shouldn't be here");
+
+    tup.types.push_back(decl.type);
   }
+  return newptr;
 }
-} // namespace expr_s
+auto tup2rec(context_t &ctx, const sptr<type_t> type) -> sptr<type_t> {
+  const auto &tup =
+      std::get<type_s::tup_t>(std::get<type_s::aggregate_t>(type.get_val()));
+  auto newptr = ctx.make_sptr<type_t>(type_s::aggregate_t{type_s::rec_t{}});
 
-namespace resolve {
-auto type_fn(context_t &ctx, sptr<locale_t> locale,
-             ssptr<unresolved_t, type_t> ptr) -> resolve_callback_t;
-auto decl_fn(context_t &ctx, sptr<locale_t> locale,
-             ssptr<decl_s::unresolved_t, decl_t> ptr) -> resolve_callback_t;
-auto expr_elm_fn(context_t &ctx, sptr<locale_t> locale,
-             ssptr<unresolved_t, expr_elm_t> ptr) -> resolve_callback_t;
-} // namespace resolve
+  auto &rec =
+      std::get<type_s::rec_t>(std::get<type_s::aggregate_t>(newptr.get_val()));
 
-namespace symbols {
-auto consume_stmts_fn(context_t &ctx, sptr<locale_t> loc, sptr<stmts_t> stmts,
-                      span_t span) -> void;
-auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
-    -> sptr<type_t>;
-auto decl_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
-    -> sptr<decl_t>;
-auto expr_val_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
-    -> expr_t;
-auto expr_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
-    -> sptr<expr_t>;
-template <void (*fn)(sptr<decl_t>, context_t &, sptr<locale_t>,
-                     cursor_helper_t &)>
-auto decl_spec_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
-    -> sptr<decl_t>;
-auto type_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
-                  cursor_helper_t &cursor) -> void;
-template <bool allow_init_val = true>
-auto var_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
-                 cursor_helper_t &cursor) -> void;
-auto todo_stmts_fn(context_t &ctx, sptr<locale_t> loc, const median_t stmt_med)
-    -> sptr<stmt_t> {
-  throw std::runtime_error(std::string(__func__) + " todo function");
+  size_t n = 0;
+  auto num2name = [](const size_t n) -> std::string {
+    return "_" + std::to_string(n);
+  };
+
+  for (auto &elm : tup.types) {
+    const auto id = n;
+    const auto name = num2name(n++);
+    auto ptr =
+        ctx.make_sptr<decl_t>(decl_s::var_decl_t{true, elm, nullptr}, name, id);
+    rec.loc->try_insert(name, ptr);
+    rec.members.push_back(ptr);
+  }
+  return newptr;
 }
+auto indirection_get_final(ssptr<type_s::indirection_t, type_t> ptr)
+    -> sptr<type_t> {
+  auto &ref = ptr.get();
+  return ovisit(
+      ref, [&](type_s::optr_t &val) -> sptr<type_t> { return ptr.ptr(); },
+      [](auto &val) -> sptr<type_t> {
+        // ptr, iptr
+        return ovisit(
+            val.type.get_val(),
+            [&](type_s::indirection_t &) -> sptr<type_t> {
+              return indirection_get_final(val.type);
+            },
+            [&](auto &) { return val.type; });
+      });
+}
+auto typeref_get_final(const type_s::type_ref_t& ptr) -> sptr<type_t> {
+  auto &ref = ptr.ref;
+  if (holds<type_s::type_ref_t>(ptr.ref.get_val()))
+    return typeref_get_final(std::get<type_s::type_ref_t>(ref.get_val()));
+  return ref;
+}
+template <typename Q>
+auto typeref_holds(const type_s::type_ref_t& ptr) -> bool {
+  return holds<Q>(typeref_get_final(ptr));
+}
+
+auto fntemplate2fnsig(context_t &ctx, type_s::fntemplate_t &fn_tem)
+    -> type_s::fnsig_t {
+  deepcopy_t dp(ctx);
+  dp.create_entry(fn_tem.locale);
+  for (const auto &elm : fn_tem.args)
+    dp.create_entry(elm.ptr());
+  dp.create_entry(fn_tem.ret_type);
+  dp.force_copy();
+
+  auto new_locale = dp.lookup(fn_tem.locale);
+  auto new_args = list<ssptr<decl_s::var_decl_t, decl_t>>{};
+  for (const auto &elm : fn_tem.args)
+    new_args.push_back(dp.lookup(elm.ptr()));
+  auto new_ret_type = dp.lookup(fn_tem.ret_type);
+  auto new_template_args = nullptr;
+  auto new_val =
+      type_s::fnsig_t{new_locale, new_template_args, new_args, new_ret_type};
+  return new_val;
+}
+
+auto fntemplate2fn(context_t &ctx, type_s::fntemplate_t &fn_tem)
+    -> type_s::callable_t {
+  auto sig = symbols::fntemplate2fnsig(ctx, fn_tem);
+  auto fn = (type_s::fn_t{ctx.make_sptr(sig)});
+  return fn;
+}
+auto fntemplate2fndecl(context_t &ctx, type_s::fntemplate_t &fn_tem,
+                       sptr<expr_t> init_expr)
+    -> decl_s::fn_decl_t {
+  auto fntype_ptr = ctx.make_sptr<type_t>(
+      type_s::fn_t{ctx.make_sptr(symbols::fntemplate2fnsig(ctx, fn_tem))});
+  auto fnval = decl_s::fn_decl_t{fntype_ptr, init_expr};
+  return fnval;
+}
+
+auto fntemplate2fndecl(context_t &ctx, type_s::fntemplate_t &fn_tem,
+                       median_t med)
+    -> decl_s::fn_decl_t{
+  auto sig = ctx.make_sptr(symbols::fntemplate2fnsig(ctx, fn_tem));
+  auto fntype_ptr = ctx.make_sptr<type_t>(type_s::fn_t{sig});
+
+  auto init_expr =
+      symbols::expr_fn(ctx, sig->get_locale(), med.fchild().as_median());
+
+  auto fnval = decl_s::fn_decl_t{fntype_ptr, init_expr};
+  return fnval;
+}
+
+
+
+
 
 auto get_decl_fin_fn(const bool localy_indistinct, context_t &ctx,
                      sptr<locale_t> loc, const final_t id_fin) -> sptr<decl_t> {
@@ -943,6 +1061,138 @@ auto callable_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     return type_t{type_s::callable_t{type_s::closure_t{sig}}};
 }
 
+void recursion_check(std::set<uintptr_t> &forbiden, const type_s::rec_t &rec,
+                     const sptr<type_t> holder);
+void recursion_check(std::set<uintptr_t> &forbiden,
+                     const type_s::type_ref_t &tref, const sptr<type_t> holder);
+void recursion_check(std::set<uintptr_t> &forbiden, 
+                      const type_s::tup_t &tup,
+                     const sptr<type_t> holder);
+
+// void recursion_check(std::set<uintptr_t> &forbiden,
+//                      const type_s::indirection_t &tup,
+//                      const sptr<type_t> holder);
+
+void recursion_check(std::set<uintptr_t> &forbiden,
+                     const type_s::aggregate_t &agg,
+                     const sptr<type_t> holder);
+
+void defvisit(const auto &val) {
+  std::println(std::cerr, "type:{}", boost::core::demangled_name(typeid(val)));
+}
+
+template <typename T>
+void recursion_check_next(std::set<uintptr_t> &forbiden, const T &next_val,
+                          const sptr<type_t> next_holder) {
+  ovisit(
+      next_val,
+      [&forbiden, next_holder](const type_s::aggregate_t &val) {
+        recursion_check(forbiden, val, next_holder);
+      },
+      // [&forbiden, next_holder](const type_s::indirection_t &val) {
+      //   recursion_check(forbiden, val, next_holder);
+      // },
+      [&forbiden, next_holder](const type_s::type_ref_t &val) {
+        recursion_check(forbiden, val, next_holder);
+      },
+      [](const auto &) {});
+}
+// void recursion_check(std::set<uintptr_t> &forbiden, const type_s::iptr_t &iptr,
+//                      const sptr<type_t> holder) {
+//   if (forbiden.contains(reinterpret_cast<uintptr_t>(holder.get_ptr())))
+//     throw std::runtime_error("Found recursive relation");
+//   recursion_check_next(forbiden, *iptr.type, iptr.type);
+// }
+// void recursion_check(std::set<uintptr_t> &forbiden, const type_s::ptr_t &ptr,
+//                      const sptr<type_t> holder) {
+//   if (forbiden.contains(reinterpret_cast<uintptr_t>(holder.get_ptr())))
+//     throw std::runtime_error("Found recursive relation");
+//   recursion_check_next(forbiden, *ptr.type, ptr.type);
+// }
+// void recursion_check(std::set<uintptr_t> &forbiden,
+//                      const type_s::indirection_t &ind,
+//                      const sptr<type_t> holder) {
+//   if (forbiden.contains(reinterpret_cast<uintptr_t>(holder.get_ptr())))
+//     throw std::runtime_error("Found recursive relation");
+
+//   ovisit(ind, [](const auto& val){});
+// }
+ 
+void recursion_check(std::set<uintptr_t> &forbiden,
+                     const type_s::aggregate_t &agg,
+                     const sptr<type_t> holder) {
+  ovisit(agg, [](const type_s::optr_t&){}, [&forbiden, holder](const auto &val) {recursion_check(forbiden, val, holder);});
+}
+
+void recursion_check(std::set<uintptr_t> &forbiden, const type_s::tup_t &tup,
+                     const sptr<type_t> holder) {
+  if (forbiden.contains(reinterpret_cast<uintptr_t>(holder.get_ptr())))
+    throw std::runtime_error("Found recursive relation");
+
+  for (const auto &type_ptr : tup.types) {
+    recursion_check_next(forbiden, *type_ptr, type_ptr);
+  }
+}
+void recursion_check(std::set<uintptr_t> &forbiden,
+                     const type_s::type_ref_t &tref,
+                     const sptr<type_t> holder) {
+  if (forbiden.contains(reinterpret_cast<uintptr_t>(holder.get_ptr())))
+    throw std::runtime_error("Found recursive relation");
+  forbiden.insert((uintptr_t)holder.get_ptr());
+
+  recursion_check_next(forbiden, *tref.ref, tref.ref);
+  // ovisit(
+  //     *tref.ref,
+  //     [&](const type_s::aggregate_t &val) {
+  //       ovisit(val, [&](const auto &val) {
+  //         recursion_check(forbiden, val, tref.ref);
+  //       });
+  //     },
+  //     [&](const type_s::type_ref_t &val) {
+  //       recursion_check(forbiden, val, tref.ref);
+  //     },
+  //     [&](const auto &val) {});
+}
+void recursion_check(std::set<uintptr_t> &forbiden, const type_s::rec_t &rec,
+                     const sptr<type_t> holder) {
+  if (forbiden.contains(reinterpret_cast<uintptr_t>(holder.get_ptr())))
+    throw std::runtime_error("Found recursive relation");
+  forbiden.insert((uintptr_t)holder.get_ptr());
+  for (const auto &mem : rec.members) {
+    ovisit(
+        *mem,
+        [&forbiden](const decl_s::var_decl_t &val) {
+          const auto type_ptr = val.type;
+          recursion_check_next(forbiden, *type_ptr, type_ptr);
+          // ovisit(
+          //     *type_ptr,
+          //     [&forbiden, type_ptr](const type_s::aggregate_t &val) {
+          //       ovisit(val, [&](const auto &val) {
+          //         recursion_check(forbiden, val, type_ptr);
+          //       });
+          //     },
+          //     [&forbiden, type_ptr](const type_s::type_ref_t &val) {
+          //       recursion_check(forbiden, val, type_ptr);
+          //     },
+          //     [&](const auto &val) {});
+        },
+        [&](const auto &val) {});
+  }
+}
+
+void tup_recursion_check(const type_s::tup_t &tup, sptr<type_t> holder) {
+  auto forbiden = std::set<uintptr_t>{};
+  recursion_check(forbiden, tup, holder);
+}
+void rec_recursion_check(const type_s::rec_t& rec, sptr<type_t> holder){
+  auto forbiden = std::set<uintptr_t>{};
+  recursion_check(forbiden, rec, holder);
+}
+void type_ref_recursion_check(const type_s::type_ref_t& tref, sptr<type_t> holder){
+  auto forbiden = std::set<uintptr_t>{};
+  recursion_check(forbiden, tref, holder);
+}
+
 auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
     -> sptr<type_t> {
   const auto node = type_med.children().begin()->node();
@@ -992,8 +1242,16 @@ auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
           return indirection_fn<type_s::iptr_t>(ctx, loc, val);
         case medianc::TUPLE:
           return tup_fn(ctx, loc, val);
-        case medianc::RECORD:
-          return rec_fn(ctx, loc, val);
+        case medianc::RECORD: {
+          auto rec = rec_fn(ctx, loc, val);
+          ctx.push_post_callback([&ctx, ptr]() -> void {
+            // this could be a problem for templates???
+            auto rec = std::get<type_s::rec_t>(
+                std::get<type_s::aggregate_t>(ptr.get_val()));
+            rec_recursion_check(rec, ptr);
+          });
+          return rec;
+        }
         case medianc::TYPEOF:
           return typeof_fn(ctx, loc, val);
         default:
@@ -1641,11 +1899,8 @@ auto consume_stmts_fn(context_t &ctx, sptr<locale_t> loc, sptr<stmts_t> stmts,
     (stmts->stmts).push_back(stmt_fn(ctx, loc, elm.as_median()));
 }
 
-__attribute__((visibility("default"))) auto entry(allocator_t &allocator,
-                                                  const token_buffer_t &toks, 
-                                                  const std::map<size_t, size_t>& toks_symetrical_map,
-                                                  grammar::node_t &root_node)
-    -> std::tuple<sptr<locale_t>, sptr<stmts_t>> {
+__attribute__((visibility("default"))) 
+auto entry(allocator_t &allocator,const token_buffer_t &toks, const std::map<size_t, size_t>& toks_symetrical_map,grammar::node_t &root_node) -> std::tuple<sptr<locale_t>, sptr<stmts_t>> {
   context_t ctx(toks, toks_symetrical_map, allocator);
 
   auto locale = ctx.make_sptr(locale_t{});
@@ -1654,8 +1909,13 @@ __attribute__((visibility("default"))) auto entry(allocator_t &allocator,
 
   // this is the "expensive part"
   consume_stmts_fn(ctx, locale, stmts, span);
+
   for (auto &callback : ctx.callback_map)
     callback.second();
+
+  for (const auto &callback : ctx.post_resolve_callbacks)
+    callback();
+
   return std::tuple{locale, stmts};
 }
 
@@ -1714,6 +1974,7 @@ auto template_init_input_res(context_t &ctx, sptr<locale_t> locale,
   return tlist;
 }
 
+
 template <bool doancestor>
 auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
                   const span_t::iterator end) -> sptr<type_t> {
@@ -1740,8 +2001,10 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
             auto med = next->as_median();
             if (med.type() == medianc::TEMPLATE_INSTATIATION) [[unlikely]] {
               // auto template_init_list =
-              return ovisit(*lookup.symbol,
-                  [&locale, &ctx, &med](decl_s::template_stamp_decl_t &val) -> sptr<type_t> {
+              return ovisit(
+                  *lookup.symbol,
+                  [&locale, &ctx,
+                   &med](decl_s::template_stamp_decl_t &val) -> sptr<type_t> {
                     auto til = template_init_input_res(ctx, locale,
                                                        *val.mod.targs, med);
 
@@ -1905,8 +2168,15 @@ auto type_ptr_asignment(context_t &ctx, sptr<locale_t> locale,
 
   if (rholds<unresolved_t>(*ptr.ptr())) [[likely]] {
     auto span = ptr.get().med.children();
+    //creating type_ref_t
     *(ptr.ptr()) = type_s::type_ref_t{resolve_callaback_s::type_impl_fn<true>(
         ctx, locale, span.begin(), span.end())};
+
+    auto tptr = ptr.ptr();
+    ctx.push_post_callback([tptr](){
+      auto tref = std::get<type_s::type_ref_t>(*tptr);
+      symbols::type_ref_recursion_check(tref, tptr);
+    });
   }
   return ptr.ptr();
 }
@@ -1931,30 +2201,29 @@ void decl_visitor(context_t &ctx, sptr<locale_t> locale, sptr<decl_t> ptr,
     *ptr = decl_s::var_decl_t{true, type_ptr, body_ptr};
     return;
   };
+
   auto fntemplate_visitor = [&](type_s::fntemplate_t &val) {
-    auto new_locale = locale_t::make_child(ctx, locale);
-    *new_locale = *val.locale;
+    // auto body_ptr = sptr<expr_t>{};
+    // if (val_med) {
+    //   body_ptr = symbols::expr_fn(ctx, fntype_ptr.get().get_locale(),
+    //                               val_med.value().fchild().as_median());
+    // } else {
+    //   throw std::runtime_error("Functions need to have a body");
+    // }
+    // auto fnval = decl_s::fn_decl_t{fntype_ptr, body_ptr};
+    if (!val_med)
+      throw std::runtime_error("Functions need to have a body");
 
-    auto fnsig_ptr = ctx.make_sptr<type_s::fnsig_t>(
-        type_s::fnsig_t{new_locale, nullptr, val.args, val.ret_type});
-    auto fntype_ptr = ctx.make_sptr<type_t>(type_s::fn_t{fnsig_ptr});
-
-    auto body_ptr = sptr<expr_t>{};
-    if (val_med) {
-      body_ptr = symbols::expr_fn(ctx, new_locale,
-                                  val_med.value().fchild().as_median());
-    }
-    auto fnval = decl_s::fn_decl_t{fntype_ptr, body_ptr};
-    *ptr = fnval;
-    return;
+    auto fn = symbols::fntemplate2fndecl(ctx, val, val_med.value());
+    *ptr = fn;
   };
 
   return ovisit(
       *type_ptr,
       [&](type_s::type_ref_t &val) {
-        auto fin = symbols::typeref_get_final(type_ptr);
+        auto fin = symbols::typeref_get_final(std::get<type_s::type_ref_t>(type_ptr.get_val()));
         return ovisit(*fin, fntemplate_visitor,
-               [&](auto &) { default_visit(type_ptr); });
+                      [&](auto &) { default_visit(type_ptr); });
       },
       default_visit);
 }
@@ -1981,7 +2250,8 @@ auto expr_elm_fn(context_t &ctx, sptr<locale_t> locale,
   static constexpr auto pfun = __PRETTY_FUNCTION__;
   return resolve_callback_t{
       resolve_callback_t::unresolved_call_t<unresolved_t, expr_elm_t>{
-          ptr, [&ctx, locale](ssptr<semantics::unresolved_t, expr_elm_t> ptr) -> void {
+          ptr,
+          [&ctx, &locale](ssptr<semantics::unresolved_t, expr_elm_t> ptr) -> void {
             // std::println(std::cerr, "{}", pfun);
             // auto valptr = ptr.ptr();
             auto med = ptr.get();
