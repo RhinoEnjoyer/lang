@@ -597,11 +597,11 @@ template <fn_t *elm, medianc::e med> auto aggregate_decl_pat DISPATCH_FNSIG {
   > (DISPATCH_ARGS);
 }
 
-auto collection_fn DISPATCH_FNSIG {
-  become aggregate_decl_pat<
-      attribute_path<medianc::ELEMENT, collection_alias_decl>,
-      medianc::COLLECTION>(DISPATCH_ARGS);
-}
+// auto collection_fn DISPATCH_FNSIG {
+//   become aggregate_decl_pat<
+//       attribute_path<medianc::ELEMENT, collection_alias_decl>,
+//       medianc::COLLECTION>(DISPATCH_ARGS);
+// }
 auto record_fn DISPATCH_FNSIG {
   // become aggregate_decl_pat<base, medianc::RECORD>(DISPATCH_ARGS);
   become aggregate_decl_pat<dive<medianc::ELEMENT, decl>, medianc::RECORD>(DISPATCH_ARGS);
@@ -614,14 +614,21 @@ auto enum_fn DISPATCH_FNSIG {
       DISPATCH_ARGS);
 }
 auto tup_fn DISPATCH_FNSIG {
-  return sequence<consume<tokc::e::BUILTIN_DUCKLING>,
+  return sequence<consume<tokc::BUILTIN_TUP>,
                   parens<dive<medianc::ELEMENT, type>, medianc::TUPLE>>(
       DISPATCH_ARGS);
 }
 
+auto collection_fn DISPATCH_FNSIG {
+  return sequence<consume<tokc::BUILTIN_UNION>,
+                  parens<dive<medianc::ELEMENT, type>, medianc::UNION>>(
+      DISPATCH_ARGS);
+}
+
 constexpr auto aggregate_table = table_t_make(
-    pair_t{tokc::BUILTIN_COLLECTION, collection_fn},
-    pair_t{tokc::BUILTIN_REC, record_fn}, pair_t{tokc::BUILTIN_UNION, union_fn},
+    pair_t{tokc::BUILTIN_TUP, tup_fn},
+    pair_t{tokc::BUILTIN_REC, record_fn}, 
+    pair_t{tokc::BUILTIN_UNION, collection_fn},
     pair_t{tokc::BUILTIN_ENUM, enum_fn});
 
 constexpr auto integral_table = table_t_make(
@@ -629,12 +636,9 @@ constexpr auto integral_table = table_t_make(
     pair_t{tokc::TYPE_FLOAT, push_final},
     pair_t{tokc::TYPE_BOOLEAN, push_final});
 
-constexpr auto anon_type_table = table_t_make<
-    aggregate_table,
-    table_t_make(
-        pair_t{tokc::BUILTIN_FN, fnpath /* <false, true> */},
-        pair_t{tokc::BUILTIN_VECTOR,
-               sequence<advance, symetrical<type, medianc::VECTOR>>})>();
+constexpr auto anon_type_table =
+    table_t_make<aggregate_table,
+                 table_t_make(pair_t{tokc::BUILTIN_FN, fnpath})>();
 
 static constexpr auto type_prefix_table = table_t_make(
     pair_t{tokc::PERISPOMENI, dive<medianc::PTR, advance2<type>>},
@@ -644,7 +648,7 @@ static constexpr auto type_prefix_table = table_t_make(
 
 constexpr auto type_table =
     table_t_make<anon_type_table, integral_table,
-                 table_t_make(pair_t{tokc::BUILTIN_DUCKLING, tup_fn},
+                 table_t_make(
                               pair_t{tokc::BUILTIN_TYPEOF,
                                      advance2<parens<expr, medianc::TYPEOF>>},
                               pair_t{tokc::BUILTIN_PTR, push_final<>},
@@ -725,7 +729,7 @@ auto if_else_path DISPATCH_FNSIG {
   const auto pair_index = ctx.smap.at(cursor_index);
   const auto pair_cursor = cursor_t(&ctx.toks.toks.at(pair_index)).advance();
   if (pair_cursor->isa(tokc::LPAREN))
-    sequence<dive<medianc::ELIF, if_branch>, if_else_path>(DISPATCH_ARGS);
+    sequence<dive<medianc::IF, if_branch>, if_else_path>(DISPATCH_ARGS);
   else
     dive<medianc::ELSE, body>(DISPATCH_ARGS);
 }
@@ -746,14 +750,11 @@ auto fn DISPATCH_FNSIG {
 
 static constexpr auto compound_lit_table = table_t_make(
     pair_t{tokc::LCBRACE, complit_fn},
-    pair_t{
-        tokc::BUILTIN_FN,
-        complit_fn<true, dive<medianc::TYPE, fndecl_sig /* <true, false> */>>},
-    pair_t{tokc::BUILTIN_REC,
-           complit_fn<false, dive<medianc::TYPE, record_fn>>},
+    pair_t{tokc::BUILTIN_FN,complit_fn<true, dive<medianc::TYPE, fndecl_sig /* <true, false> */>>},
+    pair_t{tokc::BUILTIN_REC,complit_fn<false, dive<medianc::TYPE, record_fn>>},
     pair_t{tokc::BUILTIN_ENUM, complit_fn<false, dive<medianc::TYPE, enum_fn>>},
-    pair_t{tokc::BUILTIN_UNION,
-           complit_fn<false, dive<medianc::TYPE, union_fn>>});
+    pair_t{tokc::BUILTIN_UNION,complit_fn<false, dive<medianc::TYPE, union_fn>>}
+);
 
 auto consume DISPATCH_FNSIG { become advance(DISPATCH_ARGS); }
 
@@ -1053,8 +1054,16 @@ constexpr auto base_return = table_t_make(
            advance2<medianc::RETURN, sequence<expr, expect<tokc::ENDSTMT>>>});
 constexpr auto base_loop = table_t_make(pair_t{tokc::BUILTIN_FOR, for_fn});
 
+auto break_fn DISPATCH_FNSIG {
+  dive<medianc::BREAK,
+       sequence<consume<tokc::BUILTIN_BREAK>,
+                path<table_t_make(pair_t{tokc::ENDSTMT, empty}), expr>,
+                expect<tokc::ENDSTMT>>>(DISPATCH_ARGS);
+}
 constexpr auto base_misc =
-    table_t_make(pair_t{tokc::BUILTIN_IMPORT, import_fn});
+    table_t_make(pair_t{tokc::BUILTIN_BREAK, break_fn},
+                 pair_t{tokc::BUILTIN_UNREACHABLE, push_final},
+                 pair_t{tokc::BUILTIN_IMPORT, import_fn});
 
 constexpr auto base_table =
     table_t_make<base_decls, base_return, base_loop, base_misc>();

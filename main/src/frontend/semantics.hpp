@@ -2,11 +2,13 @@
 
 // #define SEMANTICS_DEBUG
 #include <atomic>
+#include <boost/container/flat_map.hpp>
 #include <boost/core/typeinfo.hpp>
 #include "../nicknames.hpp"
 #include "../table.hpp"
 #include "./parser.hpp"
 
+#include <set>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -62,15 +64,19 @@ namespace type_s {
 struct template_args_t;
 struct callable_t;
 } // namespace type_s
+
+struct frame_t {
+  sptr<locale_t> locale;
+  sptr<stmts_t> stmts;
+  frame_t(sptr<locale_t> l, sptr<stmts_t> s) : locale(l), stmts(s) {}
+};
+
 namespace decl_s {
 
 struct scope_decl_t {
-  sptr<locale_t> loc;
-  sptr<stmts_t> stmts;
-
-  scope_decl_t(sptr<locale_t> l, sptr<stmts_t> s) : loc(l), stmts(s) {}
-
-  sptr<locale_t> get_locale() { return loc; }
+  frame_t frame;
+  scope_decl_t(sptr<locale_t> l, sptr<stmts_t> s) : frame(l, s) {}
+  sptr<locale_t> get_locale() { return frame.locale; }
 };
 
 struct var_decl_t {
@@ -82,6 +88,12 @@ struct var_decl_t {
 struct type_decl_t {
   sptr<type_t> type;
 };
+
+struct rec_member_t {
+  ssptr<var_decl_t, decl_t> decl;
+  size_t index;
+};
+
 struct template_stamp_decl_t {
   struct template_module_t {
     sptr<locale_t> locale;
@@ -111,17 +123,25 @@ using template_var_input_t = ssptr<var_decl_t, decl_t>;
 
 using var = var<empty_t, template_type_input_t, template_var_input_t,
                 unresolved_t, fn_decl_t, unwrap_decl_elm_t, var_decl_t,
-                scope_decl_t, type_decl_t, template_stamp_decl_t>;
+                rec_member_t, scope_decl_t, type_decl_t, template_stamp_decl_t>;
 } // namespace decl_s
 
 struct decl_t : public decl_s::var {
   using decl_s::var::variant;
+
   std::string name;
   size_t dindex;
 
-  decl_t(decl_s::var v, std::string n, size_t i)
+  const std::string &get_name() const noexcept { return name; }
+  size_t get_index() const noexcept { return dindex; }
+
+  decl_t(decl_s::var v, std::string& n, size_t i)
       : decl_s::var(v), name(n), dindex(i) {}
-  decl_t(decl_s::var v, std::string_view n, size_t i)
+  decl_t(decl_s::var v, std::string&& n, size_t i)
+      : decl_s::var(v), name(n), dindex(i) {}
+  decl_t(decl_s::var v, std::string_view& n, size_t i)
+      : decl_s::var(v), name(n), dindex(i) {}
+  decl_t(decl_s::var v, std::string_view&& n, size_t i)
       : decl_s::var(v), name(n), dindex(i) {}
 
   decl_t(std::string_view n, size_t i)
@@ -145,15 +165,17 @@ struct bitsize_t {
   bitsize_t(std::string_view str)
       : size(std::stoull(std::string(str.substr(1)))) {}
 
-  auto tobyte() -> size_t { return size / 8; }
-  bool operator==(const bitsize_t &other) {
-    return this->size == other.size;
-  }
+  auto &get_bitsize() { return *this; }
+
+  auto bytesize() const -> size_t { return size / 8; }
+  auto bitsize() const -> size_t { return size; }
+
+  auto operator<=>(const bitsize_t &other) { return this->size <=> other.size; }
 };
 
-#define numeric_var_cmp_fn_macro(T)                                                              \
-  inline bool operator==(const T &other) const {                               \
-    return this->size == other.size;                                           \
+#define numeric_var_cmp_fn_macro(T)                                            \
+  inline auto operator<=>(const T &other) const {                              \
+    return this->size <=> other.size;                                          \
   }
 #define numeric_var_bitsize_constructor(T)                                     \
   T(const size_t val) : bitsize_t(val) {}                                      \
@@ -196,8 +218,6 @@ struct numeric_t : public numeric_var {
   using numeric_var ::operator=;
 };
 
-
-
 struct ptr_t {
   sptr<type_t> type;
 };
@@ -216,11 +236,17 @@ struct template_args_t {
   using var = var<type_input_ptr, var_input_ptr>;
   using list_t = list<var>;
   list_t args;
+
+  size_t size() const noexcept { return args.size(); }
+  var at(size_t i) const { return args[i]; }
 };
 
 struct rec_t {
   sptr<locale_t> loc;
-  list<sptr<decl_t>> members;
+
+  using membholder_t = list<sptr<decl_t>>;
+  membholder_t members;
+
   sptr<locale_t> get_locale() { return loc; }
 };
 
@@ -229,7 +255,31 @@ struct tup_t {
   sptr<locale_t> get_locale() { return nullptr; }
 };
 
-VAR_MACRO(aggregate, rec_t, tup_t);
+struct collection_t {};
+
+using aggregate_var = var<rec_t, tup_t>;
+struct aggregate_t : public aggregate_var {
+  using aggregate_var ::variant;
+  using aggregate_var ::operator=;
+
+  aggregate_var &var() { return static_cast<aggregate_var &>(*this); }
+  const aggregate_var &var() const {return static_cast<const aggregate_var &>(*this);}
+
+  bool is_rec(){ return holds<rec_t>(var());}
+  // bool is_rec() const { return holds<const rec_t>(var());}
+
+  bool is_tup(){ return holds<tup_t>(var());}
+  // bool is_tup() const { return holds<const tup_t>(var());}
+
+  rec_t &get_as_rec() { return std::get<rec_t>(var()); }
+  tup_t &get_as_tup() { return std::get<tup_t>(var()); }
+
+  // const rec_t &get_as_rec() const { return std::get<rec_t>(var()); }
+
+  sptr<locale_t> get_locale() {
+    return ovisit(var(), [](auto &val) { return val.get_locale(); });
+  }
+};
 
 struct fntype_t {
   list<sptr<type_t>> arg_types;
@@ -247,41 +297,36 @@ struct fnsig_t {
   sptr<template_args_t> template_args;
   list<ssptr<decl_s::var_decl_t, decl_t>> args;
   sptr<type_t> ret_type;
-
-  // fnsig_t(sptr<locale_t> l, sptr<template_args_t> ta,
-  //         list<ssptr<decl_s::var_decl_t, decl_t>> &a, sptr<type_t> r)
-  //     : ask_t(), locale(l), template_args(ta), args(a), ret_type(r) {}
-
-  // fnsig_t(sptr<locale_t> l, sptr<template_args_t> ta,
-  //         list<ssptr<decl_s::var_decl_t, decl_t>> &&a, sptr<type_t> r)
-  //     : ask_t(), locale(l), template_args(ta), args(std::move(a)), ret_type(r) {
-  // }
-
   sptr<locale_t> get_locale() { return locale; }
 };
 
-struct fn_t {
-  sptr<fnsig_t> sig;
-  // fn_t(sptr<fnsig_t> s) : ask_t(), sig(s) {}
-  sptr<locale_t> get_locale() { return sig->get_locale(); }
-};
-struct closure_t {
-  sptr<fnsig_t> sig;
-  // closure_t(sptr<fnsig_t> s) : ask_t(), sig(s) {}
-  sptr<locale_t> get_locale() { return sig->get_locale(); }
-};
+struct fn_t {};
+struct closure_t {};
 
 using callable_var = var<fn_t, closure_t>;
 struct callable_t : public callable_var {
-  using callable_var ::variant;
-  using callable_var ::operator=;
-  sptr<locale_t> get_locale() { 
+  using callable_var::variant;
+  using callable_var::operator=;
 
-    return ovisit(*this, [](auto& val) -> sptr<locale_t> {return val.get_locale();});
-  }
+  sptr<fnsig_t> sig;
 
+  // Constructor for fn_t + fnsig_t
+  callable_t(fn_t &fn, sptr<fnsig_t> sig)
+      : callable_var(fn), sig(std::move(sig)) {}
+  callable_t(fn_t &&fn, sptr<fnsig_t> sig)
+      : callable_var(fn), sig(std::move(sig)) {}
+
+  // Constructor for closure_t + fnsig_t
+  callable_t(const closure_t &closure, sptr<fnsig_t> sig)
+      : callable_var(closure), sig(std::move(sig)) {}
+  callable_t(const closure_t &&closure, sptr<fnsig_t> sig)
+      : callable_var(closure), sig(std::move(sig)) {}
+
+  sptr<locale_t> get_locale() const { return sig->get_locale(); }
+  sptr<type_t> get_ret_type() const { return sig->ret_type; }
+  auto get_template_args() const { return sig->template_args; }
+  const auto &get_args() const { return sig->args; }
 };
-
 struct infered_t {};
 
 struct type_ref_t {
@@ -393,6 +438,7 @@ struct op_meta_t {
 //   op_t{op_operation_e::PLUSPLUS, op_type_e::UNARY, op_assoc_e::LEFT, 12},
 //   op_t{op_operation_e::MINUSMINUS, op_type_e::UNARY, op_assoc_e::LEFT, 12},
 // };
+
 static constexpr auto op_table = std::array<op_meta_t, static_cast<size_t>(op_operation_e::last)>{
   // Arithmetic
   op_meta_t{op_operation_e::PLUS,        op_type_e::BINARY, op_assoc_e::LEFT, 8, false},
@@ -424,7 +470,7 @@ static constexpr auto op_table = std::array<op_meta_t, static_cast<size_t>(op_op
   op_meta_t{op_operation_e::DIVASSIGN,   op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
   // Misc
   op_meta_t{op_operation_e::PIPE,        op_type_e::BINARY, op_assoc_e::LEFT, 1, false},
-  op_meta_t{op_operation_e::NEG,         op_type_e::UNARY, op_assoc_e::RIGHT, 11, false}, // Assuming binary for consistency, even though it's typically unary
+  op_meta_t{op_operation_e::NEG,         op_type_e::UNARY, op_assoc_e::RIGHT, 11, false}, 
   op_meta_t{op_operation_e::DEREF,       op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false},
   op_meta_t{op_operation_e::ADDRESS,     op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false},
   op_meta_t{op_operation_e::AS,          op_type_e::UNARY,  op_assoc_e::RIGHT, 10, true},
@@ -434,13 +480,14 @@ struct operator_t {
   struct as_payload_t {
     sptr<type_t> type;
   };
-  union payload_t{
+  union payload_t {
     empty_t empty;
     as_payload_t as;
   };
   op_operation_e type;
   payload_t payload;
 
+  // RAWDOGGING THE UNION
   auto get_as_payload() -> as_payload_t & { return payload.as; }
 
   const op_meta_t &meta() { return op_table.at(static_cast<size_t>(type)); }
@@ -451,18 +498,27 @@ struct number_t {
 };
 
 namespace post {
+
 struct fncall_t {
+  // function pointer
+  // function
+  // closure
+  sptr<decl_t> callable;
   list<sptr<expr_t>> args;
 };
-struct access_t{
+
+struct access_t {
   std::string_view name;
 };
-struct array_access_t{
+
+struct array_access_t {
   sptr<expr_t> index;
 };
+
 } // namespace post
 
 VAR_MACRO(postfix, post::fncall_t, post::access_t, post::array_access_t);
+
 struct chain_t {
   list<sptr<postfix_t>> chain;
 };
@@ -471,9 +527,7 @@ struct pipe_t {
   sptr<expr_t> lhs;
   opt<chain_t> chain;
 };
-// the parser needs to change to allow different representations
-//  the function one should make basicaly a new locale_t and stmts_t
-//  but anyother should be just an expresion list
+
 struct complit_t {
   sptr<type_t> type;
   list<sptr<expr_t>> init_vals;
@@ -485,11 +539,10 @@ struct sizeof_t {
 
 // this a chain like
 struct result_t {
-  sptr<locale_t> loc;
-  sptr<stmts_t> stmts;
+  frame_t frame;
+  result_t(sptr<locale_t> l, sptr<stmts_t> s) : frame(l, s) {}
   // plus whatever a chain has here
 };
-
 
 struct if_t {
   struct if_link_t {
@@ -515,7 +568,7 @@ struct subexpr_t {
   sptr<expr_t> expr;
 };
 
-VAR_MACRO(operand, unresolved_t,  decl_ref_t, fn_lit_t, if_t, complit_t,
+VAR_MACRO(operand, unresolved_t,  chain_t, decl_ref_t, fn_lit_t, if_t, complit_t,
           number_t, sizeof_t, result_t);
 using var = var<empty_t, subexpr_t, unresolved_t, operator_t, operand_t>;
 } // namespace expr_s
@@ -545,7 +598,13 @@ struct forloop_t {
   sptr<stmts_t> body_stmts;
   void a() {}
 };
-using var = var<empty_t, unwrap_decl_arr_t, forloop_t, import_t, ret_t,
+
+struct break_t{ 
+  sptr<expr_t> expr;
+};
+
+struct unreachable_t{};
+using var = var<empty_t, unreachable_t, break_t, unwrap_decl_arr_t, forloop_t, import_t, ret_t,
                 sptr<decl_t>, sptr<expr_t>>;
 } // namespace stmt_s
 struct stmt_t : stmt_s::var {
@@ -556,8 +615,8 @@ struct stmts_t {
   list<sptr<stmt_t>> stmts;
 };
 
-struct locale_t {
 
+struct locale_t {
   using val_t = sptr<decl_t>;
   using entry_t = val_t;
   using map_entry_t = std::tuple<std::string_view, val_t>;
@@ -590,6 +649,7 @@ struct locale_t {
     const bool found;
     const path_t path;
     const entry_t symbol;
+    operator bool(){return found;}
   };
 
   template <typename SPECIALISED_TYPE> struct slookup_t {
@@ -735,11 +795,13 @@ struct resolve_callback_t {
     return std::nullopt;
   }
   template <typename Y, typename T>
-  auto get_callback_obj() -> opt<std::reference_wrapper<unresolved_call_t<Y, T>>> {
+  auto get_callback_obj()
+      -> opt<std::reference_wrapper<unresolved_call_t<Y, T>>> {
     if (rholds<unresolved_call_t<Y, T>>(call))
       return std::get<unresolved_call_t<Y, T>>(call);
     return std::nullopt;
   }
+
   void operator()() {
     ovisit(call, [](auto &val) -> auto { return val(); });
   }
@@ -752,21 +814,21 @@ struct resolve_callback_t {
 struct context_t {
   const token_buffer_t &toks;
   const std::map<size_t, size_t> &toks_symetrical_map;
-  std::atomic_uint64_t cindex;
 
+  std::atomic_uint64_t cindex;
   allocator_t &allocator;
   std::map<uintptr_t, resolve_callback_t> callback_map;
 
   using post_resolve_callback_t = std::function<void()>;
   list<post_resolve_callback_t> post_resolve_callbacks;
-  //not needed?
-  std::mutex mut;
+
+  std::mutex mut; //not needed?
 
   context_t(const token_buffer_t &t, const std::map<size_t, size_t> &tsm, allocator_t &a)
       : toks(t), toks_symetrical_map(tsm), cindex(0), allocator(a),
         callback_map({}), mut() {}
 
-  void push_post_callback(post_resolve_callback_t callback) {
+  void push_recursion_check(post_resolve_callback_t callback) {
     post_resolve_callbacks.push_back(callback);
   }
 
