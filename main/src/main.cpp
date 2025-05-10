@@ -15,15 +15,16 @@
 
 void print_tokens(const token_buffer_t &buffer) {
   std::cout << std::left << std::setw(8) << "Index" << std::setw(8) << "Type"
-            << std::setw(8) << "Row" << std::setw(8) << "Col"
-            << std::setw(8) << "Len" << "Str" << "\n";
+            << std::setw(8) << "Row" << std::setw(8) << "Col" << std::setw(8)
+            << "Len" << "Str" << "\n";
   std::cout << std::string(50, '-') << "\n";
 
   for (auto it = buffer.toks.cbegin(); it != buffer.toks.cend(); ++it) {
     std::size_t index = buffer.to_index(it);
-    std::cout << std::setw(8) << index << std::setw(8) << static_cast<int>(it->type())
-              << std::setw(8) << buffer.row(it) << std::setw(8) << buffer.col(it)
-              << std::setw(8) << buffer.len(it) << buffer.str(it) << "\n";
+    std::cout << std::setw(8) << index << std::setw(8)
+              << static_cast<int>(it->type()) << std::setw(8) << buffer.row(it)
+              << std::setw(8) << buffer.col(it) << std::setw(8)
+              << buffer.len(it) << buffer.str(it) << "\n";
   }
 }
 
@@ -46,7 +47,6 @@ int main(int argc, char *argv[]) {
   }
 
   auto lam = [](const std::string filepath) {
-    // sleep(10);
     auto src = [&filepath]() -> src_buffer_t {
         namespace fs = std::filesystem;
         if (!fs::exists(filepath)) {
@@ -80,7 +80,9 @@ int main(int argc, char *argv[]) {
                                        *grammar_output.begin());
     });
     auto &[file_locale, file_stmts] = symbols_result;
+
     semantics::print(file_stmts);
+
     std::cout << "\n"
               << "Lexer: " << lex_time << "\n"
               << "\tToken buffer byte count: " << lex_output.toks.size()*sizeof(token_t)*sizeof(srcloc_t) << "\n" //The compiler is tripping here ->

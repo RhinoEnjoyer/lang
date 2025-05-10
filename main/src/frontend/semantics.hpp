@@ -1,6 +1,7 @@
 #pragma once
 
 // #define SEMANTICS_DEBUG
+#include <list>
 #include <atomic>
 #include <boost/container/flat_map.hpp>
 #include <boost/core/typeinfo.hpp>
@@ -20,18 +21,6 @@
 #include <unordered_map>
 #include <utility>
 #include <variant>
-
-// Multi files
-//  start form one file
-//  discover other files
-//  spawn threads
-//  when resolving a symbol
-//  how to be able to retrieve the data???
-//    virtual locale class??
-//  ban variable declarations on top level ??
-//  (separate functions form variables a bit more??)
-//
-//
 
 #define VAR_MACRO(name, ...)                                                   \
   using name##_var = var<__VA_ARGS__>;                                         \
@@ -117,10 +106,8 @@ struct unresolved_t {
   median_t type;
   opt<median_t> value;
 };
-
 using template_type_input_t = ssptr<type_decl_t, type_t>;
 using template_var_input_t = ssptr<var_decl_t, decl_t>;
-
 using var = var<empty_t, template_type_input_t, template_var_input_t,
                 unresolved_t, fn_decl_t, unwrap_decl_elm_t, var_decl_t,
                 rec_member_t, scope_decl_t, type_decl_t, template_stamp_decl_t>;
@@ -132,21 +119,18 @@ struct decl_t : public decl_s::var {
   std::string name;
   size_t dindex;
 
-  const std::string &get_name() const noexcept { return name; }
-  size_t get_index() const noexcept { return dindex; }
-
   decl_t(decl_s::var v, std::string& n, size_t i)
       : decl_s::var(v), name(n), dindex(i) {}
   decl_t(decl_s::var v, std::string&& n, size_t i)
-      : decl_s::var(v), name(n), dindex(i) {}
-  decl_t(decl_s::var v, std::string_view& n, size_t i)
-      : decl_s::var(v), name(n), dindex(i) {}
-  decl_t(decl_s::var v, std::string_view&& n, size_t i)
+      : decl_s::var(v), name(std::move(n)), dindex(i) {}
+  decl_t(decl_s::var v, std::string_view n, size_t i)
       : decl_s::var(v), name(n), dindex(i) {}
 
   decl_t(std::string_view n, size_t i)
       : decl_s::var(empty_t{}), name(n), dindex(i) {}
 
+  const std::string_view get_name() const noexcept { return name; }
+  size_t get_index() const noexcept { return dindex; }
   decl_t &operator=(const auto &rhs) {
     static_cast<decl_s::var &>(*this) = rhs;
     return *this;
@@ -218,15 +202,19 @@ struct numeric_t : public numeric_var {
   using numeric_var ::operator=;
 };
 
-struct ptr_t {
-  sptr<type_t> type;
-};
-struct iptr_t {
-  sptr<type_t> type;
-};
+struct ptr_t {sptr<type_t> type;};
+struct iptr_t {sptr<type_t> type;};
 struct optr_t {};
-VAR_MACRO(indirection, ptr_t, iptr_t, optr_t);
+struct array_t {
+  sptr<expr_t> len;
+  sptr<type_t> type;
+};
 
+using indirection_var = var<ptr_t, iptr_t, optr_t, array_t>;
+struct indirection_t : public indirection_var {
+  using indirection_var ::variant;
+  using indirection_var ::operator=;
+};
 struct void_t {};
 VAR_MACRO(primitive, void_t, numeric_t);
 
@@ -470,13 +458,43 @@ static constexpr auto op_table = std::array<op_meta_t, static_cast<size_t>(op_op
   op_meta_t{op_operation_e::DIVASSIGN,   op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
   // Misc
   op_meta_t{op_operation_e::PIPE,        op_type_e::BINARY, op_assoc_e::LEFT, 1, false},
-  op_meta_t{op_operation_e::NEG,         op_type_e::UNARY, op_assoc_e::RIGHT, 11, false}, 
+  op_meta_t{op_operation_e::NEG,         op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false}, 
   op_meta_t{op_operation_e::DEREF,       op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false},
   op_meta_t{op_operation_e::ADDRESS,     op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false},
   op_meta_t{op_operation_e::AS,          op_type_e::UNARY,  op_assoc_e::RIGHT, 10, true},
 };
+struct operand_t;
+struct operator_t;
 
-struct operator_t {
+// struct operator_base_t {
+//   struct as_payload_t {
+//     sptr<type_t> type;
+//   };
+//   union payload_t {
+//     empty_t empty;
+//     as_payload_t as;
+//   };
+//   op_operation_e type;
+//   payload_t payload;
+
+//   // RAWDOGGING THE UNION
+//   auto get_as_payload() -> as_payload_t & { return payload.as; }
+
+//   const op_meta_t &meta() { return op_table.at(static_cast<size_t>(type)); }
+// };
+
+struct uopt_t{
+  ssptr<operand_t, expr_elm_t> operand;
+};
+struct bopt_t{
+  ssptr<operand_t, expr_elm_t> lhs;
+  ssptr<operand_t, expr_elm_t> rhs;
+};
+
+using operator_var = var<empty_t, uopt_t, bopt_t>;
+struct operator_t : public operator_var {
+  using operator_var ::variant;
+  using operator_var ::operator=;
   struct as_payload_t {
     sptr<type_t> type;
   };
@@ -487,11 +505,44 @@ struct operator_t {
   op_operation_e type;
   payload_t payload;
 
+  operator_t(op_operation_e t, payload_t p)
+      : operator_var(empty_t{}), type(t), payload(p) {}
+
+  operator_t(op_operation_e t, payload_t p, operator_var val)
+      : operator_var(val), type(t), payload(p) {}
+
   // RAWDOGGING THE UNION
   auto get_as_payload() -> as_payload_t & { return payload.as; }
 
   const op_meta_t &meta() { return op_table.at(static_cast<size_t>(type)); }
+
+  operator_t &operator=(const auto &rhs) {
+    static_cast<operator_var &>(*this) = rhs;
+    return *this;
+  }
+  operator_t &operator=(auto &&rhs) {
+    static_cast<operator_var &>(*this) = std::move(rhs);
+    return *this;
+  }
 };
+
+// struct operator_t {
+//   struct as_payload_t {
+//     sptr<type_t> type;
+//   };
+//   union payload_t {
+//     empty_t empty;
+//     as_payload_t as;
+//   };
+//   op_operation_e type;
+//   payload_t payload;
+
+//   // RAWDOGGING THE UNION
+//   auto get_as_payload() -> as_payload_t & { return payload.as; }
+
+//   const op_meta_t &meta() { return op_table.at(static_cast<size_t>(type)); }
+// };
+
 
 struct number_t {
   std::string_view val;
@@ -499,28 +550,28 @@ struct number_t {
 
 namespace post {
 
-struct fncall_t {
-  // function pointer
-  // function
-  // closure
-  sptr<decl_t> callable;
-  list<sptr<expr_t>> args;
-};
+struct deref_t{};
+struct address_t{};
 
-struct access_t {
-  std::string_view name;
-};
-
-struct array_access_t {
+struct index_access_t {
   sptr<expr_t> index;
+  sptr<type_t> type; //maybe uncomment this?
 };
-
+struct fn_access_t {
+  ssptr<decl_s::fn_decl_t, decl_t> val;
+};
+struct var_access_t {
+  ssptr<decl_s::var_decl_t, decl_t> val;
+};
+struct rec_member_access_t {
+  ssptr<decl_s::rec_member_t, decl_t> val;
+};
 } // namespace post
 
-VAR_MACRO(postfix, post::fncall_t, post::access_t, post::array_access_t);
+VAR_MACRO(postfix, post::index_access_t, post::var_access_t, post::fn_access_t, post::rec_member_access_t);
 
 struct chain_t {
-  list<sptr<postfix_t>> chain;
+  list<postfix_t> chain;
 };
 
 struct pipe_t {
@@ -539,8 +590,11 @@ struct sizeof_t {
 
 // this a chain like
 struct result_t {
+  sptr<expr_t> expr;
+};
+struct block_t {
   frame_t frame;
-  result_t(sptr<locale_t> l, sptr<stmts_t> s) : frame(l, s) {}
+  block_t(sptr<locale_t> l, sptr<stmts_t> s) : frame(l, s) {}
   // plus whatever a chain has here
 };
 
@@ -559,24 +613,21 @@ struct fn_lit_t {
   sptr<stmts_t> body;
 };
 
-struct decl_ref_t {
-  sptr<decl_t> decl;
-};
-
 struct subexpr_t {
   ssptr<subexpr_t, expr_elm_t> prev;
   sptr<expr_t> expr;
 };
 
-VAR_MACRO(operand, unresolved_t,  chain_t, decl_ref_t, fn_lit_t, if_t, complit_t,
-          number_t, sizeof_t, result_t);
-using var = var<empty_t, subexpr_t, unresolved_t, operator_t, operand_t>;
+VAR_MACRO(operand, chain_t, fn_lit_t, if_t, complit_t, number_t, sizeof_t,
+          result_t, block_t);
+using var = var<empty_t, unresolved_t, subexpr_t, operator_t, operand_t>;
 } // namespace expr_s
 struct expr_elm_t : public expr_s::var {
   using expr_s::var::variant;
 };
 struct expr_t {
-  list<sptr<expr_elm_t>> exprs;
+  sptr<expr_elm_t> val;
+  // list<sptr<expr_elm_t>> exprs;
 };
 
 namespace stmt_s {
@@ -820,8 +871,10 @@ struct context_t {
   std::map<uintptr_t, resolve_callback_t> callback_map;
 
   using post_resolve_callback_t = std::function<void()>;
-  list<post_resolve_callback_t> post_resolve_callbacks;
+  std::list<post_resolve_callback_t> post_resolve_callbacks;
 
+  std::unordered_map<uintptr_t, sptr<type_t>> expr_type_map;
+  
   std::mutex mut; //not needed?
 
   context_t(const token_buffer_t &t, const std::map<size_t, size_t> &tsm, allocator_t &a)

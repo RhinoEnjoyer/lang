@@ -82,7 +82,7 @@ private:
 };
 
 namespace expr_s {
-auto token_to_operator(const tokc::e token) -> operator_t {
+auto token_to_operator(const tokc::e token) -> operator_t{
   using enum op_operation_e; 
   switch (token) {
   case tokc::EQUALS:          return {EQ, {empty_t{}}};
@@ -314,8 +314,10 @@ struct deepcopy_t {
   void insert2map(type_s::indirection_t &val) {
     // deepcopy because it is better to do so
     ovisit(
-        val, [this](type_s::ptr_t &val) { insert2map(val.type); },
+        val, 
+        [this](type_s::ptr_t &val) { insert2map(val.type); },
         [this](type_s::iptr_t &val) { insert2map(val.type); },
+        [this](type_s::array_t& val) { insert2map(val.len);      insert2map(val.type); },
         [](type_s::optr_t &val) {});
   }
   void insert2map(type_s::callable_t &val) {
@@ -428,12 +430,10 @@ struct deepcopy_t {
             val.expr.ptr = lookup(val.expr).ptr;
         },
         [this](decl_s::rec_member_t &val) {
-          if (val.decl.ptr())
-            val.decl.ptr().ptr = lookup(val.decl.ptr()).ptr;
+          val.decl.ptr().ptr = lookup(val.decl.ptr()).ptr;
         },
         [this](decl_s::type_decl_t &val) {
-          if (val.type)
-            val.type.ptr = lookup(val.type).ptr;
+          val.type.ptr = lookup(val.type).ptr;
         },
         [this](decl_s::template_stamp_decl_t &val) {
           if (val.type)
@@ -468,12 +468,14 @@ struct deepcopy_t {
           ovisit(
               val,
               [this](type_s::ptr_t &val) {
-                if (val.type)
-                  val.type.ptr = lookup(val.type).ptr;
+                val.type.ptr = lookup(val.type).ptr;
               },
               [this](type_s::iptr_t &val) {
-                if (val.type)
-                  val.type.ptr = lookup(val.type).ptr;
+                val.type.ptr = lookup(val.type).ptr;
+              },
+              [this](type_s::array_t &val) {
+                val.type.ptr = lookup(val.type).ptr;
+                val.len.ptr = lookup(val.len).ptr;
               },
               [](type_s::optr_t &) {});
         },
@@ -492,10 +494,7 @@ struct deepcopy_t {
           if (val.ret_type)
             val.ret_type.ptr = lookup(val.ret_type).ptr;
         },
-        [this](type_s::type_ref_t &val) {
-          if (val.ref)
-            val.ref.ptr = lookup(val.ref).ptr;
-        },
+        [this](type_s::type_ref_t &val) { val.ref.ptr = lookup(val.ref).ptr; },
         [](type_s::primitive_t &val) {
           // No need to do anything since templates don't affect them
         },
@@ -566,6 +565,7 @@ auto rec2tup(context_t &ctx, sptr<type_t> type) -> sptr<type_t> {
   }
   return newptr;
 }
+
 auto tup2rec(context_t &ctx, const sptr<type_t> type) -> sptr<type_t> {
   const auto &tup =
       std::get<type_s::tup_t>(std::get<type_s::aggregate_t>(type.get_val()));
@@ -589,21 +589,6 @@ auto tup2rec(context_t &ctx, const sptr<type_t> type) -> sptr<type_t> {
   }
   return newptr;
 }
-auto indirection_get_final(ssptr<type_s::indirection_t, type_t> ptr)
-    -> sptr<type_t> {
-  auto &ref = ptr.get();
-  return ovisit(
-      ref, [&](type_s::optr_t &val) -> sptr<type_t> { return ptr.ptr(); },
-      [](auto &val) -> sptr<type_t> {
-        // ptr, iptr
-        return ovisit(
-            val.type.get_val(),
-            [&](type_s::indirection_t &) -> sptr<type_t> {
-              return indirection_get_final(val.type);
-            },
-            [&](auto &) { return val.type; });
-      });
-}
 
 auto typeref_get_final(const type_s::type_ref_t& ptr) -> sptr<type_t> {
   auto &ref = ptr.ref;
@@ -611,10 +596,32 @@ auto typeref_get_final(const type_s::type_ref_t& ptr) -> sptr<type_t> {
     return typeref_get_final(std::get<type_s::type_ref_t>(ref.get_val()));
   return ref;
 }
-
 template <typename Q>
 auto typeref_holds(const type_s::type_ref_t &ptr) -> bool {
   return holds<Q>(typeref_get_final(ptr));
+}
+
+std::pair<size_t, sptr<type_t>>
+indirection_final(sptr<type_t> ptr, const size_t n, const size_t limit) {
+  using ret = std::pair<size_t, sptr<type_t>>;
+
+  const auto typeref_visit = [&](type_s::type_ref_t &val) -> ret {
+    return indirection_final(typeref_get_final(val), n, limit);
+  };
+
+  if (n > limit) [[unlikely]]
+    return ovisit(*ptr, typeref_visit,
+                  [&](auto &val) -> ret { return {n, ptr}; });
+  return ovisit(
+      *ptr, typeref_visit,
+      [&](type_s::indirection_t &val) -> ret {
+        return ovisit(
+            val, [&](type_s::optr_t &val) -> ret { return {n, ptr}; },
+            [&](auto &val) -> ret {
+              return indirection_final(val.type, n + 1, limit);
+            });
+      },
+      [&](auto &val) -> ret { return {n, ptr}; });
 }
 
 auto fntemplate2fntype(context_t &ctx, type_s::fntemplate_t &fn_tem)
@@ -633,6 +640,7 @@ auto fntemplate2fntype(context_t &ctx, type_s::fntemplate_t &fn_tem)
 
   return {std::move(new_type_list), new_ret_type};
 }
+
 auto fntemplate2fnsig(context_t &ctx, type_s::fntemplate_t &fn_tem)
     -> type_s::fnsig_t {
   deepcopy_t dp(ctx);
@@ -717,8 +725,7 @@ auto get_decl_fn(const bool localy_indistinct, context_t &ctx,
   return {ptr, cursor};
 }
 
-auto template_arg_list_fn(context_t &ctx, 
-                          sptr<locale_t> loc,
+auto template_arg_list_fn(context_t &ctx, sptr<locale_t> loc,
                           const median_t med) -> type_s::template_args_t {
   auto list = type_s::template_args_t::list_t{};
   for (auto &elm : med.children()) {
@@ -1363,12 +1370,12 @@ auto as_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
 auto expr_operator_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> sptr<expr_elm_t> {
   auto node = med.fchild().node();
-  return ctx.make_sptr<expr_elm_t>(ovisit(
+  auto base = ovisit(
       node,
-      [](const final_t &val) -> expr_elm_t {
+      [](const final_t &val) -> expr_s::operator_t {
         return expr_s::token_to_operator(val->type());
       },
-      [&ctx, &loc](const median_t &val) -> expr_elm_t {
+      [&ctx, &loc](const median_t &val) -> expr_s::operator_t {
         switch (val.type()) {
         case medianc::AS:
           return expr_s::operator_t{
@@ -1378,24 +1385,18 @@ auto expr_operator_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
           std::unreachable();
         }
       },
-      [](const auto &) -> expr_elm_t { std::unreachable(); }));
-}
-
-// part that will be reused on a chain
-auto chain_auxilary_fn(context_t &ctx, sptr<locale_t> loc,
-                       cursor_helper_t &cursor) -> expr_elm_t {
-  // ctx.dbg_add_call();
-
-  return empty_t{};
-}
-auto chain_intro_fn(context_t &ctx, sptr<locale_t> loc, cursor_helper_t &cursor)
-    -> expr_elm_t {
-  return empty_t{};
-}
-
-auto chain_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
-    -> expr_elm_t {
-  return empty_t{};
+      [](const auto &) -> expr_s::operator_t { std::unreachable(); });
+  auto& meta = base.meta();
+  base = [&] -> expr_s::operator_var {
+    if (meta.type == expr_s::op_type_e::BINARY) {
+      return expr_s::bopt_t{{nullptr}, {nullptr}};
+    } else if (meta.type == expr_s::op_type_e::UNARY) {
+      return expr_s::uopt_t{{nullptr}};
+    } else {
+      std::unreachable();
+    }
+  }();
+  return ctx.make_sptr<expr_elm_t>(base);
 }
 
 // TODO add the chain
@@ -1403,21 +1404,28 @@ auto self_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> expr_elm_t {
   return empty_t{};
 }
+
 // TODO add the chain
-auto result_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
-    -> expr_s::result_t {
-  // auto locale = locale_t::make_child(ctx, loc);
-  auto locale = loc;
+auto block_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
+    -> expr_s::block_t {
+  auto locale = locale_t::make_child(ctx, loc);
   auto stmts = ctx.make_sptr(stmts_t{});
   auto cursor = cursor_helper_t{med.children()};
 
   auto body_med = cursor.extract<medianc::BODY>();
   consume_stmts_fn(ctx, locale, stmts, body_med->children());
 
-  // chain part
-  // chain_loop_fn(ctx, loc, cursor);
-
   return {locale, stmts};
+}
+
+auto result_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
+    -> expr_s::result_t {
+  auto cursor = cursor_helper_t{med.children()};
+
+  auto body_med = cursor.extract<medianc::BODY>();
+  auto expr_ptr = expr_fn(ctx, loc, body_med.value().fchild().as_median());
+
+  return {expr_ptr};
 }
 
 auto pipe_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
@@ -1552,6 +1560,8 @@ auto expr_operand_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
           return unresolved_t{val};
         case medianc::RESULT:
           return result_fn(ctx, loc, val);
+        case medianc::BLOCK_EXPR:
+          return block_fn(ctx, loc, val);
         case medianc::SIZEOF:
           return sizeof_fn(ctx, loc, val);
         case medianc::COMPOUND_LITERAL:
@@ -1620,6 +1630,69 @@ auto expr_val_fn2(context_t &ctx, sptr<locale_t> loc, auto begin, auto end) -> e
   return expr_t{queue};
 }
 
+// auto expr_val_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
+//     -> expr_t {
+//   auto ch = med.children();
+//   auto cursor = ch.begin();
+
+//   while (ch.contains(cursor)) {
+//     auto med = cursor->as_median();
+//     switch (med.type()) {
+//     case medianc::OPERAND: {
+//       auto op = expr_operand_fn(ctx, loc, med);
+//     } break;
+//     case medianc::OPERATOR: {
+//       ssptr<expr_s::operator_t, expr_elm_t> op =
+//           expr_operator_fn(ctx, loc, med);
+//     } break;
+//     default:
+//       std::unreachable();
+//       break;
+//     }
+//     cursor.advance();
+//   }
+
+//   return expr_t{};
+// }
+
+auto expr_shunting_yard_eval(std::span<sptr<expr_elm_t>> queue) -> sptr<expr_elm_t> {
+  list<sptr<expr_elm_t>> stack;
+
+  for (auto &elm : queue) {
+    auto &val = elm.get_val();
+    auto operator_visitor = [&](expr_s::operator_t &val) {
+      const auto &meta = val.meta();
+      // int operand_count = (int)meta.type;
+
+      if (stack.size() < (int)meta.type)
+        throw std::runtime_error("Invalid argument count");
+
+      ovisit(
+          val,
+          [&](expr_s::bopt_t &val) {
+            val.rhs = stack.back();
+            stack.pop_back();
+            val.lhs = stack.back();
+            stack.pop_back();
+          },
+          [&](expr_s::uopt_t &val) {
+            val.operand = stack.back();
+            stack.pop_back();
+          },
+          [](auto &) { std::unreachable(); });
+      stack.push_back(elm);
+    };
+
+    auto operand_visitor = [&](expr_s::operand_t &) { stack.push_back(elm); };
+    ovisit(val, operand_visitor, operator_visitor, [&](auto &) {});
+  }
+
+  if (stack.size() > 1)
+    throw std::runtime_error("TOO MANY");
+
+  return stack.back();
+}
+
 auto expr_val_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> expr_t {
   auto ch = med.children();
@@ -1629,11 +1702,12 @@ auto expr_val_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
   // https://en.wikipedia.org/wiki/Shunting_yard_algorithm
   list<sptr<expr_elm_t>> queue;
   podlist_t<ssptr<expr_s::operator_t, expr_elm_t>> stack;
-  size_t n = 0;
+  size_t subexpr_count = 0;
   queue.reserve(ch.size2());
   stack.resize(ch.size2());
 
-  static auto lam = [](context_t &ctx, list<sptr<expr_elm_t>> &queue,
+  list<std::function<void()>> subexpr_eval;
+  static auto lam = [&subexpr_eval](context_t &ctx, list<sptr<expr_elm_t>> &queue,
                 podlist_t<ssptr<expr_s::operator_t, expr_elm_t>> &stack,
                 size_t &n) {
     for (const auto &elm : stack)
@@ -1642,10 +1716,13 @@ auto expr_val_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     ssptr<expr_s::subexpr_t, expr_elm_t> prev_subexpr =
         (n == 0) ? nullptr : queue[n - 1];
     queue.resize(n);
-    queue.push_back(ctx.make_sptr<expr_elm_t>(expr_s::subexpr_t{
-        prev_subexpr, ctx.make_sptr<expr_t>(std::move(newlist))}));
+    auto ptr = ctx.make_sptr<expr_t>(std::move(newlist));
+    queue.push_back(ctx.make_sptr<expr_elm_t>(
+        expr_s::subexpr_t{prev_subexpr, ptr}));
     stack.clear();
     n++;
+
+
   };
 
   while (ch.contains(cursor)) {
@@ -1661,7 +1738,7 @@ auto expr_val_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
       const auto &o1meta = op.get().meta();
 
       if (o1meta.op == expr_s::op_operation_e::PIPE) {
-        lam(ctx, queue, stack, n);
+        lam(ctx, queue, stack, subexpr_count);
         cursor.advance();
         continue;
       }
@@ -1687,15 +1764,17 @@ auto expr_val_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     }
     cursor.advance();
   }
-  if (n > 0) {
-    lam(ctx, queue, stack, n);
+
+  //we we have a list of subexprs
+  if (subexpr_count > 0) {
+    lam(ctx, queue, stack, subexpr_count);
+    return expr_t{queue};
   } else {
+  // just a regular expresion
     for (auto &elm : stack)
       queue.push_back(elm.ptr());
   }
-
   stack.release();
-  return expr_t{queue};
 }
 
 auto expr_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
@@ -1811,6 +1890,78 @@ entry(allocator_t &allocator,
     callback();
 
   return std::tuple{locale, stmts};
+}
+
+sptr<type_t> get_type(context_t &ctx, sptr<locale_t> locale, sptr<decl_t> ptr);
+sptr<type_t> get_type(context_t &ctx, sptr<locale_t> locale, sptr<expr_elm_t> ptr);
+sptr<type_t> get_type(context_t &ctx, sptr<locale_t> locale, sptr<expr_t> ptr);
+
+sptr<type_t> get_type(context_t &ctx, sptr<locale_t> locale, sptr<expr_t> ptr){
+  return {nullptr};
+}
+
+sptr<type_t> get_type(context_t &ctx, sptr<locale_t> locale, expr_s::postfix_t& val) {
+
+  return ovisit(
+      val,
+      [](expr_s::post::index_access_t& val) -> sptr<type_t> {
+        val.type;
+      },
+      [](expr_s::post::rec_member_access_t &val) -> sptr<type_t> {
+        return val.val.get().decl.get().type;
+      },
+      [](expr_s::post::var_access_t &val) -> sptr<type_t> {
+        return val.val.get().type;
+      },
+      [](expr_s::post::fn_access_t &val) -> sptr<type_t> {
+        return val.val.get().sig.ptr();
+      },
+      [](auto &val) -> sptr<type_t> { return {nullptr}; });
+}
+sptr<type_t> get_type(context_t &ctx, sptr<locale_t> locale, expr_s::operator_t& val) {return {nullptr};}
+sptr<type_t> get_type(context_t &ctx, sptr<locale_t> locale, expr_s::operand_t& val) {
+  return ovisit(
+      val,
+      [&](expr_s::chain_t &val) -> sptr<type_t> {
+        return get_type(ctx, locale, val.chain.back());
+      },
+      [&](expr_s::number_t &val) {
+        return ctx.make_sptr<type_t>(type_s::float_t{64});
+      },
+      [&](expr_s::fn_lit_t& val){
+        return val.sig.ptr();
+      },
+      [&](expr_s::complit_t& val){
+        return val.type;
+      },
+      [&](expr_s::result_t& val){
+        return get_type(ctx,locale, val.expr);
+      },
+      [](auto &val) -> sptr<type_t> { return {nullptr}; });
+}
+sptr<type_t> get_type(context_t &ctx, sptr<locale_t> locale, sptr<expr_elm_t> ptr) {
+  return ovisit(
+      *ptr, 
+      [&](expr_s::chain_t& val) -> sptr<type_t> {
+        return get_type(ctx, locale, val.chain.back());
+      },
+      [](auto &val) -> sptr<type_t> {
+        return {nullptr};
+      }
+  );
+}
+sptr<type_t> get_type(context_t &ctx, sptr<locale_t> locale, sptr<decl_t> ptr) {
+  return ovisit(
+      *ptr, 
+      [](decl_s::var_decl_t &val) -> sptr<type_t> { return val.type; },
+      [](decl_s::type_decl_t &val) -> sptr<type_t> { return val.type; },
+      [](decl_s::rec_member_t &val) -> sptr<type_t> {
+        return val.decl.get().type;
+      },
+      [](decl_s::fn_decl_t &val) -> sptr<type_t> { return val.sig.ptr(); },
+      [](auto &val) -> sptr<type_t> {
+        throw std::runtime_error("Can't exctract type from this");
+      });
 }
 
 } // namespace symbols
@@ -2028,7 +2179,9 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
                               });
                         },
                         [](auto &val) -> ret {
-                          throw std::runtime_error(std::string(__PRETTY_FUNCTION__) + " This shouldn't happen");
+                          throw std::runtime_error(
+                              std::string(__PRETTY_FUNCTION__) +
+                              " This shouldn't happen");
                         });
                     return type_ptr;
                   },
@@ -2055,7 +2208,8 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
       [](auto &) -> sptr<type_t> { throw std::runtime_error("Unreachable"); });
 }
 
-auto type_ptr_asignment(context_t &ctx, sptr<locale_t> locale, ssptr<unresolved_t, type_t> ptr) -> sptr<type_t> {
+auto type_ptr_asignment(context_t &ctx, sptr<locale_t> locale,
+                        ssptr<unresolved_t, type_t> ptr) -> sptr<type_t> {
   if (rholds<unresolved_t>(*ptr.ptr())) [[likely]] {
     auto span = ptr.get().med.children();
     // creating type_ref_t
@@ -2127,8 +2281,8 @@ auto decl_fn(context_t &ctx, sptr<locale_t> locale,
           }}};
 }
 
+
 namespace chain_state {
-#define END_STATE return
 auto invalid(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
              cursor_t &cursor) -> void {
   throw std::runtime_error("Invalid state");
@@ -2143,26 +2297,58 @@ auto resolve_symbol(context_t &ctx, sptr<locale_t> locale, final_t final)
 
   return lookup.symbol;
 }
+
 void member(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
             cursor_t &cursor, expr_s::chain_t &chain,
             ssptr<decl_s::rec_member_t, decl_t> val);
 
-void variable(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
-              cursor_t &cursor, expr_s::chain_t &chain,
-              ssptr<decl_s::var_decl_t, decl_t> val);
+void var(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
+         cursor_t &cursor, expr_s::chain_t &chain,
+         ssptr<decl_s::var_decl_t, decl_t> val);
 
 void scope(context_t &ctx, const span_t &ch, cursor_t &cursor,
            expr_s::chain_t &chain, ssptr<decl_s::scope_decl_t, decl_t> val);
 
-void variable(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
-              cursor_t &cursor, expr_s::chain_t &chain,
-              ssptr<decl_s::var_decl_t, decl_t> val) {
+void fncall(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
+            cursor_t &cursor, expr_s::chain_t &chain, median_t med);
+
+void index(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
+           cursor_t &cursor, expr_s::chain_t &chain, median_t &med,
+           ssptr<type_s::indirection_t, type_t> ptr);
+
+void handle_after_var_and_member(context_t &ctx, sptr<locale_t> locale,
+                                 const span_t &ch, cursor_t &cursor,
+                                 expr_s::chain_t &chain, sptr<type_t> type);
+
+void index(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
+           cursor_t &cursor, expr_s::chain_t &chain, median_t &med,
+           ssptr<type_s::indirection_t, type_t> ptr) {
+  auto exprs = list<sptr<expr_t>>{};
+  auto med_cursor = cursor_helper_t{med.children()};
+  while (med_cursor.within()) {
+    auto med = med_cursor.extract<medianc::EXPR>();
+    auto ptr = semantics::symbols::expr_fn(ctx, locale, med.value());
+    exprs.push_back(ptr);
+  }
+  // check if you can dereference with that depth
+  auto [depth, type] = symbols::indirection_final(ptr.ptr(), 0, exprs.size());
+
+  if (depth < exprs.size())
+    throw std::runtime_error("Can't dereference that deep");
+
+  for (auto &expr : exprs)
+    chain.chain.push_back(expr_s::post::index_access_t{expr});
 
   cursor.advance();
   if (!ch.contains(cursor))
-    END_STATE;
+    return;
 
-  auto& type = val.get().type;
+  handle_after_var_and_member(ctx, locale, ch, cursor, chain, type);
+}
+void handle_after_var_and_member(context_t &ctx, sptr<locale_t> locale,
+                                 const span_t &ch, cursor_t &cursor,
+                                 expr_s::chain_t &chain, sptr<type_t> type) {
+  // auto &type = val.get().type;
   if (cursor->is_final()) {
     if (rholds<type_s::aggregate_t, type_s::rec_t>(*type)) {
       auto locale = std::get<type_s::aggregate_t>(*type).get_locale();
@@ -2176,40 +2362,73 @@ void variable(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
           [&](decl_s::scope_decl_t &) {
             scope(ctx, ch, cursor, chain, symbol);
           },
-          [&](auto & val) {
-            std::println(std::cerr, "type:{}",
-                         boost::core::demangled_name(typeid(val)));
-                invalid(ctx, locale, ch, cursor);
-          });
-    }else{
+          [&](auto &val) { invalid(ctx, locale, ch, cursor); });
+    } else {
+      ovisit(*type, [](auto &val) {
+        std::println(std::cerr, "type:{}",
+                     boost::core::demangled_name(typeid(val)));
+      });
       throw std::runtime_error("This variable does not have members");
     }
   } else if (cursor->is_median()) {
     auto med = cursor->as_median();
-
     // TODO: add support for arrays
-    if (rholds<type_s::fntype_t>(*type) &&
-        med.type() == medianc::FUNCTION_CALL) {
+    if (med.type() == medianc::FUNCTION_CALL &&
+        rholds<type_s::fntype_t>(*type)) {
       throw std::runtime_error(
           "Found function call but it is not supported yet");
-    } else if (rholds<type_s::indirection_t>(*type) &&
-               med.type() == medianc::ARRAY_ACCESS) {
-      throw std::runtime_error(
-          "Found array access but it is not supported yet");
+      return fncall(ctx, locale, ch, cursor, chain, med);
+    } else if (med.type() == medianc::ARRAY_ACCESS &&
+               rholds<type_s::indirection_t>(*type)) {
+      index(ctx, locale, ch, cursor, chain, med, type);
     } else {
       throw std::runtime_error("Variable does not support this feature");
     }
   }
 }
+void var(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
+         cursor_t &cursor, expr_s::chain_t &chain,
+         ssptr<decl_s::var_decl_t, decl_t> val) {
+  chain.chain.push_back(expr_s::post::var_access_t{val});
+  cursor.advance();
+  if (!ch.contains(cursor))
+    return;
+  handle_after_var_and_member(ctx, locale, ch, cursor, chain, val.get().type);
+}
 
 void member(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
             cursor_t &cursor, expr_s::chain_t &chain,
             ssptr<decl_s::rec_member_t, decl_t> val) {
+  chain.chain.push_back(expr_s::post::rec_member_access_t{val});
   cursor.advance();
+  if (!ch.contains(cursor))
+    return;
+  handle_after_var_and_member(ctx, locale, ch, cursor, chain,
+                              val.get().decl.get().type);
 }
 
 void fncall(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
-            cursor_t &cursor, expr_s::chain_t &chain) {}
+            cursor_t &cursor, expr_s::chain_t &chain, median_t med) {}
+
+void function(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
+              cursor_t &cursor, expr_s::chain_t &chain,
+              ssptr<decl_s::fn_decl_t, decl_t> val) {
+  chain.chain.push_back(expr_s::post::fn_access_t{val});
+  if (!ch.contains(cursor))
+    return;
+  cursor.advance();
+
+  if (!cursor->is_median())
+    throw std::runtime_error(
+        "Functions can be used as function pointers or with calls");
+
+  auto med = cursor->as_median();
+  if (med.type() != medianc::FUNCTION_CALL)
+    throw std::runtime_error(
+        "Functions can be used as function pointers or with calls");
+
+  return fncall(ctx, locale, ch, cursor, chain, med);
+}
 
 void scope(context_t &ctx, const span_t &ch, cursor_t &cursor,
            expr_s::chain_t &chain, ssptr<decl_s::scope_decl_t, decl_t> val) {
@@ -2224,15 +2443,12 @@ void scope(context_t &ctx, const span_t &ch, cursor_t &cursor,
   auto symbol = resolve_symbol(ctx, locale, cursor->as_final());
   ovisit(
       *symbol,
-      [&](decl_s::scope_decl_t &) {
-        chain_state::scope(ctx, ch, cursor, chain, symbol);
-      },
+      [&](decl_s::scope_decl_t &) { scope(ctx, ch, cursor, chain, symbol); },
       [&](decl_s::var_decl_t &) {
-        chain_state::variable(ctx, locale, ch, cursor, chain, symbol);
+        var(ctx, locale, ch, cursor, chain, symbol);
       },
-      [&](decl_s::fn_decl_t&) {
-        throw std::runtime_error("Functions are not supported yet");
-        // chain_state::variable(ctx, locale, ch, cursor, chain, symbol);
+      [&](decl_s::fn_decl_t &) {
+        function(ctx, locale, ch, cursor, chain, symbol);
       },
       [&](auto &val) { invalid(ctx, locale, ch, cursor); });
 }
@@ -2246,24 +2462,20 @@ void entry(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
         chain_state::scope(ctx, ch, cursor, chain, symbol);
       },
       [&](decl_s::var_decl_t &) {
-        chain_state::variable(ctx, locale, ch, cursor, chain, symbol);
+        chain_state::var(ctx, locale, ch, cursor, chain, symbol);
       },
       [&](auto &val) { invalid(ctx, locale, ch, cursor); });
 }
-// auto index_access(context_t &ctx, sptr<locale_t> locale, const span_t& ch,
-// cursor_t& cursor) -> void {}
-#undef END_STATE
 }; // namespace chain_state
 
 auto resolve_chain_fn(context_t &ctx, sptr<locale_t> locale,
-                      const median_t &chain) -> expr_elm_t {
+                      const median_t &med) -> expr_elm_t {
 
-  auto ch = chain.children();
+  auto ch = med.children();
   auto cursor = ch.begin();
-  auto val = expr_s::chain_t{};
-  chain_state::entry(ctx, locale, ch, cursor, val);
-
-  return empty_t{};
+  auto chain = expr_s::chain_t{};
+  chain_state::entry(ctx, locale, ch, cursor, chain);
+  return chain;
 }
 
 auto expr_elm_fn(context_t &ctx, sptr<locale_t> locale,
@@ -2272,11 +2484,11 @@ auto expr_elm_fn(context_t &ctx, sptr<locale_t> locale,
   return resolve_callback_t{
       resolve_callback_t::unresolved_call_t<unresolved_t, expr_elm_t>{
           ptr,
-          [&ctx,locale](ssptr<semantics::unresolved_t, expr_elm_t> ptr) -> void {
-            // std::println(std::cerr, "{}", pfun);
+          [&ctx,
+           locale](ssptr<semantics::unresolved_t, expr_elm_t> ptr) -> void {
             auto valptr = ptr.ptr();
             auto med = ptr.get().med;
-            *valptr = resolve_chain_fn(ctx,  locale, med);
+            *valptr = resolve_chain_fn(ctx, locale, med);
           }}};
 }
 } // namespace resolve

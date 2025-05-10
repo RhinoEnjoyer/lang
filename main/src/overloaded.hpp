@@ -16,3 +16,8 @@ auto ovisit(Variant &&variant, Visitors ...visitors) {
   return std::visit(overloaded{std::forward<Visitors>(visitors)...},
                     std::forward<Variant>(variant));
 }
+template <typename Variant, typename... Visitors>
+auto ovisit(const Variant &&variant, Visitors ...visitors) {
+  return std::visit(overloaded{std::forward<Visitors>(visitors)...},
+                    std::forward<Variant>(variant));
+}

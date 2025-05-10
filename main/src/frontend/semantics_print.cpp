@@ -5,7 +5,7 @@
 namespace semantics{
 
 
-#define instr std::string(indent * 3, ' ')
+#define instr std::string(indent * 2, ' ')
 #define inprint(next)                                                          \
   std::print(std::cerr,"{}", instr);                                                     \
   next
@@ -136,8 +136,33 @@ void print(sptr<type_t> &val, const size_t indent) {
       deflam);
 }
 
-void print(expr_s::result_t &val, const size_t indent) {
+void print(expr_s::block_t &val, const size_t indent) {
   print(val.frame.stmts, indent);
+}
+
+void print(expr_s::chain_t& val, const size_t indent){
+  auto visit_lam = [](expr_s::postfix_t &val, const size_t indent) {
+    ovisit(
+        val,
+        [&indent](expr_s::post::var_access_t &val) {
+          inprint(printvar);
+          // print(val.val.ptr(), indent + 1);
+        },
+        [&indent](expr_s::post::fn_access_t &val) {
+          inprint(printvar);
+          // print(val.val.ptr(), indent + 1);
+        },
+        [&indent](expr_s::post::rec_member_access_t &val) {
+          inprint(printvar);
+          // print(val.val.ptr(), indent + 1);
+        },
+        [&indent](auto &val) { inprint(printvar); });
+  };
+  for (auto &elm : val.chain) {
+    // inprint(std::println("{{"));
+    visit_lam(elm, indent + 1);
+    // inprint(std::println("}}"));
+  }
 }
 __attribute__((visibility("default")))
 void print(sptr<expr_elm_t> &val, const size_t indent) {
@@ -159,7 +184,9 @@ void print(sptr<expr_elm_t> &val, const size_t indent) {
       [&indent](expr_s::operand_t &val) {
         inprint(printvar);
         ovisit(
-            val, [indent](expr_s::result_t &val) { inprint(printvar); print(val, indent); },
+            val, 
+            [indent](expr_s::block_t &val) { inprint(printvar); print(val, indent + 1); },
+            [indent](expr_s::chain_t& val) { inprint(printvar); print(val, indent + 1); },
             [indent](auto &val) { inprint(printvar); });
       },
       [&indent](expr_s::subexpr_t &val) {
@@ -174,8 +201,11 @@ __attribute__((visibility("default")))
 void print(sptr<expr_t> &val, const size_t indent) {
   inprint(printvar);
   inprint(std::println(std::cerr,"{}", (void *)val.get_ptr()));
-  for (auto &elm : val->exprs)
+  for (auto &elm : val->exprs) {
+    inprint(std::println("{{"));
     print(elm, indent + 1);
+    inprint(std::println("}}"));
+  }
 }
 __attribute__((visibility("default")))
 void print(sptr<stmt_t> &val, const size_t indent) {

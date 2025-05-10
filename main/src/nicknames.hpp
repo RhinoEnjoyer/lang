@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../libs/mempool.hpp"
+#include <cstdint>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -24,6 +25,9 @@ template <typename T> struct sptr {
 
   auto *get_ptr() const { return ptr; }
   auto &get_val() const { return *ptr; }
+
+  void *as_void() const { return ptr; }
+  uintptr_t as_uint() { return reinterpret_cast<uintptr_t>(as_void()); }
 
   auto *operator->() const { return get_ptr(); }
   auto &operator*() const { return get_val(); }

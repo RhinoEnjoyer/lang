@@ -499,10 +499,20 @@ constexpr auto fncall =
 constexpr auto array_access =
     pair_t{tokc::LBRACE, braces<expr, medianc::ARRAY_ACCESS>};
 constexpr auto template_init = pair_t{tokc::LCBRACE, grammar::template_init};
+
+constexpr auto inline_op = table_t_make(
+    pair_t{tokc::AMPERSAND, push_final}, 
+    pair_t{tokc::PERISPOMENI, push_final}
+);
 } // namespace chain_aux
 
-constexpr auto chain_2_table = table_t_make(
-    chain_aux::fncall, chain_aux::array_access, chain_aux::template_init);
+constexpr auto chain_2_table =
+    table_t_make<
+    chain_aux::inline_op,
+    table_t_make(
+        chain_aux::fncall, 
+        chain_aux::array_access,
+        chain_aux::template_init)>();
 
 [[clang::always_inline]]
 inline auto chain_mid DISPATCH_FNSIG {
@@ -748,25 +758,37 @@ auto fn DISPATCH_FNSIG {
 }
 } // namespace if_stmt
 
-static constexpr auto compound_lit_table = table_t_make(
-    pair_t{tokc::LCBRACE, complit_fn},
-    pair_t{tokc::BUILTIN_FN,complit_fn<true, dive<medianc::TYPE, fndecl_sig /* <true, false> */>>},
-    pair_t{tokc::BUILTIN_REC,complit_fn<false, dive<medianc::TYPE, record_fn>>},
-    pair_t{tokc::BUILTIN_ENUM, complit_fn<false, dive<medianc::TYPE, enum_fn>>},
-    pair_t{tokc::BUILTIN_UNION,complit_fn<false, dive<medianc::TYPE, union_fn>>}
-);
-
 auto consume DISPATCH_FNSIG { become advance(DISPATCH_ARGS); }
 
 constexpr auto operand_expr_table = table_t_make<
-    compound_lit_table,
+    // compound_lit_table,
     table_t_make(
-        pair_t{tokc::ID, chain}, pair_t{tokc::LPAREN, result},
+        pair_t{tokc::BUILTIN_FN,
+               complit_fn<true,
+                          dive<medianc::TYPE, fndecl_sig /* <true, false> */>>},
+        pair_t{tokc::BUILTIN_REC,
+               complit_fn<false, dive<medianc::TYPE, record_fn>>},
+        pair_t{tokc::BUILTIN_ENUM,
+               complit_fn<false, dive<medianc::TYPE, enum_fn>>},
+        pair_t{tokc::BUILTIN_UNION,
+               complit_fn<false, dive<medianc::TYPE, union_fn>>},
+        pair_t{tokc::ID, chain},
+        pair_t{tokc::LPAREN,
+               custom_chain<medianc::RESULT, parens<expr, medianc::BODY>>},
+        pair_t{tokc::LCBRACE,
+               sequence<custom_chain<medianc::BLOCK_EXPR,
+                                     cbraces<base, medianc::BODY>>>},
+
+        // pair_t{tokc::LCBRACE, complit_fn},
+        pair_t{tokc::BUILTIN_DUCKLING,
+               path<table_t_make(
+                        pair_t{tokc::LCBRACE, sequence<consume, complit_fn>},
+                        pair_t{tokc::LPAREN, sequence<consume, init_list>}),
+                    nullptr, 1>},
         pair_t{tokc::BUILTIN_SELF,
                custom_chain<medianc::SELF, consume<tokc::BUILTIN_SELF>>},
         pair_t{tokc::BUILTIN_PIPE,
                custom_chain<medianc::PIPE, consume<tokc::BUILTIN_PIPE>>},
-        pair_t{tokc::BUILTIN_DUCKLING, init_list},
         pair_t{tokc::INT, push_final}, pair_t{tokc::FLOAT, push_final},
         pair_t{tokc::STRLIT, push_final},
         pair_t{tokc::BUILTIN_NULL, push_final},
@@ -778,11 +800,7 @@ constexpr auto operand_expr_table = table_t_make<
                                                        medianc::SIZEOF>},
                    pair_t{tokc::LCBRACE, cbraces_wrapper<end_with_scolon<type>,
                                                          medianc::SIZEOF>})>>},
-        pair_t{tokc::BUILTIN_WHILE, while_fn}
-        // why is While here??? I guess for <expr> -> while(<some expr that
-        // uses
-        // @pipe>){} ...
-        )>();
+        pair_t{tokc::BUILTIN_WHILE, while_fn})>();
 
 #define TOKEN_OPERATOR(CODE) pair_t{tokc::CODE, push_final},
 constexpr auto symbol_operator_table = table_t_make(
