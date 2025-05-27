@@ -5,7 +5,7 @@
 namespace semantics{
 
 
-#define instr std::string(indent * 2, ' ')
+#define instr std::string(indent * 3, ' ')
 #define inprint(next)                                                          \
   std::print(std::cerr,"{}", instr);                                                     \
   next
@@ -46,7 +46,7 @@ void print(sptr<decl_t> &val, const size_t indent) {
         if (val.expr)
           print(val.expr, indent + 1);
       },
-      [&indent](decl_s::rec_member_t &val) {
+      [&indent](decl_s::field_t &val) {
         inprint(printvar);
         inprint(std::println("index:{}", val.index));
         print(val.decl.ptr(), indent + 1);
@@ -114,7 +114,9 @@ void print(sptr<type_t> &val, const size_t indent) {
             val,
             [&indent](type_s::rec_t &val) {
               inprint(printvar);
-              for (auto &elm : val.members)
+              for (auto &elm : val.fields)
+                print(elm.ptr(), indent + 1);
+              for (auto &elm : val.idecls)
                 print(elm, indent + 1);
             },
             [&indent](type_s::tup_t &val) {
@@ -152,7 +154,7 @@ void print(expr_s::chain_t& val, const size_t indent){
           inprint(printvar);
           // print(val.val.ptr(), indent + 1);
         },
-        [&indent](expr_s::post::rec_member_access_t &val) {
+        [&indent](expr_s::post::field_access_t &val) {
           inprint(printvar);
           // print(val.val.ptr(), indent + 1);
         },
@@ -168,6 +170,7 @@ __attribute__((visibility("default")))
 void print(sptr<expr_elm_t> &val, const size_t indent) {
   inprint(printvar);
   inprint(std::println(std::cerr,"{}", (void *)val.get_ptr()));
+  print(val->type, indent+1);
   ovisit(
       val.get_val(),
       [&indent](expr_s::operator_t &val) {
@@ -180,6 +183,25 @@ void print(sptr<expr_elm_t> &val, const size_t indent) {
           inprint(std::println(std::cerr,"as_payload"));
           print(as_payload.type, indent + 1);
         }
+        ovisit(
+            val, 
+            [&](expr_s::bop_t &val) { 
+              inprint(std::println("BOP")); 
+              inprint(std::println("lhs{{")); 
+              print(val.lhs, indent + 1);
+              inprint(std::println("}}")); 
+              inprint(std::println("rhs{{")); 
+              print(val.rhs, indent + 1);
+              inprint(std::println("}}")); 
+            },
+            [&](expr_s::uop_t &val) {
+              inprint(std::println("UOPT"));
+              inprint(std::println("the_one_side{{")); 
+              print(val.operand, indent + 1);
+              inprint(std::println("}}")); 
+            },
+            [](auto) {});
+        
       },
       [&indent](expr_s::operand_t &val) {
         inprint(printvar);
@@ -200,12 +222,11 @@ void print(sptr<expr_elm_t> &val, const size_t indent) {
 __attribute__((visibility("default")))
 void print(sptr<expr_t> &val, const size_t indent) {
   inprint(printvar);
-  inprint(std::println(std::cerr,"{}", (void *)val.get_ptr()));
-  for (auto &elm : val->exprs) {
+  inprint(std::println(std::cerr, "{}", (void *)val.get_ptr()));
+  print(val->type, indent+1);
     inprint(std::println("{{"));
-    print(elm, indent + 1);
+    print(val->val, indent + 1);
     inprint(std::println("}}"));
-  }
 }
 __attribute__((visibility("default")))
 void print(sptr<stmt_t> &val, const size_t indent) {

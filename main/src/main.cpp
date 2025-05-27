@@ -71,7 +71,6 @@ int main(int argc, char *argv[]) {
       return grammar::entry(lex_output, lex_symetrical_map,
                             lex_output.toks.cbegin(), lex_output.toks.cend());
     });
-
     grammar::traverse(lex_output, grammar_output);
 
     auto symbol_pool = allocator_t::make();

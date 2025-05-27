@@ -78,7 +78,7 @@ struct type_decl_t {
   sptr<type_t> type;
 };
 
-struct rec_member_t {
+struct field_t {
   ssptr<var_decl_t, decl_t> decl;
   size_t index;
 };
@@ -110,7 +110,7 @@ using template_type_input_t = ssptr<type_decl_t, type_t>;
 using template_var_input_t = ssptr<var_decl_t, decl_t>;
 using var = var<empty_t, template_type_input_t, template_var_input_t,
                 unresolved_t, fn_decl_t, unwrap_decl_elm_t, var_decl_t,
-                rec_member_t, scope_decl_t, type_decl_t, template_stamp_decl_t>;
+                field_t, scope_decl_t, type_decl_t, template_stamp_decl_t>;
 } // namespace decl_s
 
 struct decl_t : public decl_s::var {
@@ -232,8 +232,11 @@ struct template_args_t {
 struct rec_t {
   sptr<locale_t> loc;
 
-  using membholder_t = list<sptr<decl_t>>;
-  membholder_t members;
+  using fieldholder_t = list<ssptr<decl_s::field_t, decl_t>>;
+  fieldholder_t fields;
+
+  using internaldecls_t = list<sptr<decl_t>>;
+  internaldecls_t idecls;
 
   sptr<locale_t> get_locale() { return loc; }
 };
@@ -285,6 +288,7 @@ struct fnsig_t {
   sptr<template_args_t> template_args;
   list<ssptr<decl_s::var_decl_t, decl_t>> args;
   sptr<type_t> ret_type;
+
   sptr<locale_t> get_locale() { return locale; }
 };
 
@@ -302,13 +306,13 @@ struct callable_t : public callable_var {
   callable_t(fn_t &fn, sptr<fnsig_t> sig)
       : callable_var(fn), sig(std::move(sig)) {}
   callable_t(fn_t &&fn, sptr<fnsig_t> sig)
-      : callable_var(fn), sig(std::move(sig)) {}
+      : callable_var(std::move(fn)), sig(std::move(sig)) {}
 
   // Constructor for closure_t + fnsig_t
   callable_t(const closure_t &closure, sptr<fnsig_t> sig)
       : callable_var(closure), sig(std::move(sig)) {}
   callable_t(const closure_t &&closure, sptr<fnsig_t> sig)
-      : callable_var(closure), sig(std::move(sig)) {}
+      : callable_var(std::move(closure)), sig(std::move(sig)) {}
 
   sptr<locale_t> get_locale() const { return sig->get_locale(); }
   sptr<type_t> get_ret_type() const { return sig->ret_type; }
@@ -451,47 +455,31 @@ static constexpr auto op_table = std::array<op_meta_t, static_cast<size_t>(op_op
   op_meta_t{op_operation_e::SLEFT,       op_type_e::BINARY, op_assoc_e::LEFT, 7,false},
   op_meta_t{op_operation_e::SRIGHT,      op_type_e::BINARY, op_assoc_e::LEFT, 7,false},
   // Assignment
-  op_meta_t{op_operation_e::ASSIGN,      op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
-  op_meta_t{op_operation_e::PLUSASSIGN,  op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
-  op_meta_t{op_operation_e::MINUSASSIGN, op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
-  op_meta_t{op_operation_e::MULTASSIGN,  op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
-  op_meta_t{op_operation_e::DIVASSIGN,   op_type_e::BINARY, op_assoc_e::RIGHT, 0,false},
+  op_meta_t{op_operation_e::ASSIGN,      op_type_e::BINARY, op_assoc_e::RIGHT, -99,false},
+  op_meta_t{op_operation_e::PLUSASSIGN,  op_type_e::BINARY, op_assoc_e::RIGHT, -99,false},
+  op_meta_t{op_operation_e::MINUSASSIGN, op_type_e::BINARY, op_assoc_e::RIGHT, -99,false},
+  op_meta_t{op_operation_e::MULTASSIGN,  op_type_e::BINARY, op_assoc_e::RIGHT, -99,false},
+  op_meta_t{op_operation_e::DIVASSIGN,   op_type_e::BINARY, op_assoc_e::RIGHT, -99,false},
   // Misc
-  op_meta_t{op_operation_e::PIPE,        op_type_e::BINARY, op_assoc_e::LEFT, 1, false},
+  op_meta_t{op_operation_e::PIPE,        op_type_e::BINARY, op_assoc_e::LEFT, 0, false},
   op_meta_t{op_operation_e::NEG,         op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false}, 
-  op_meta_t{op_operation_e::DEREF,       op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false},
+  // op_meta_t{op_operation_e::DEREF,       op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false},
   op_meta_t{op_operation_e::ADDRESS,     op_type_e::UNARY,  op_assoc_e::RIGHT, 11, false},
   op_meta_t{op_operation_e::AS,          op_type_e::UNARY,  op_assoc_e::RIGHT, 10, true},
 };
+
 struct operand_t;
 struct operator_t;
 
-// struct operator_base_t {
-//   struct as_payload_t {
-//     sptr<type_t> type;
-//   };
-//   union payload_t {
-//     empty_t empty;
-//     as_payload_t as;
-//   };
-//   op_operation_e type;
-//   payload_t payload;
-
-//   // RAWDOGGING THE UNION
-//   auto get_as_payload() -> as_payload_t & { return payload.as; }
-
-//   const op_meta_t &meta() { return op_table.at(static_cast<size_t>(type)); }
-// };
-
-struct uopt_t{
-  ssptr<operand_t, expr_elm_t> operand;
+struct uop_t {
+  sptr<expr_elm_t> operand;
 };
-struct bopt_t{
-  ssptr<operand_t, expr_elm_t> lhs;
-  ssptr<operand_t, expr_elm_t> rhs;
+struct bop_t {
+  sptr<expr_elm_t> lhs;
+  sptr<expr_elm_t> rhs;
 };
 
-using operator_var = var<empty_t, uopt_t, bopt_t>;
+using operator_var = var<empty_t, uop_t, bop_t>;
 struct operator_t : public operator_var {
   using operator_var ::variant;
   using operator_var ::operator=;
@@ -526,32 +514,29 @@ struct operator_t : public operator_var {
   }
 };
 
-// struct operator_t {
-//   struct as_payload_t {
-//     sptr<type_t> type;
-//   };
-//   union payload_t {
-//     empty_t empty;
-//     as_payload_t as;
-//   };
-//   op_operation_e type;
-//   payload_t payload;
-
-//   // RAWDOGGING THE UNION
-//   auto get_as_payload() -> as_payload_t & { return payload.as; }
-
-//   const op_meta_t &meta() { return op_table.at(static_cast<size_t>(type)); }
-// };
 
 
-struct number_t {
-  std::string_view val;
+struct float_t{};
+struct int_t{};
+
+using number_var = var<float_t, int_t>;
+struct number_t : number_var {
+  using number_var ::variant;
+  using number_var ::operator=;
+
+  std::string_view num;
+
+  number_t(number_var v, std::string_view n) : number_var(v), num(n) {}
 };
 
 namespace post {
 
-struct deref_t{};
-struct address_t{};
+struct deref_t{
+  sptr<type_t> type;
+};
+struct address_t{
+  sptr<type_t> type;
+};
 
 struct index_access_t {
   sptr<expr_t> index;
@@ -563,12 +548,12 @@ struct fn_access_t {
 struct var_access_t {
   ssptr<decl_s::var_decl_t, decl_t> val;
 };
-struct rec_member_access_t {
-  ssptr<decl_s::rec_member_t, decl_t> val;
+struct field_access_t {
+  ssptr<decl_s::field_t, decl_t> val;
 };
 } // namespace post
 
-VAR_MACRO(postfix, post::index_access_t, post::var_access_t, post::fn_access_t, post::rec_member_access_t);
+VAR_MACRO(postfix, post::deref_t, post::index_access_t, post::var_access_t, post::fn_access_t, post::field_access_t);
 
 struct chain_t {
   list<postfix_t> chain;
@@ -592,10 +577,10 @@ struct sizeof_t {
 struct result_t {
   sptr<expr_t> expr;
 };
+
 struct block_t {
   frame_t frame;
   block_t(sptr<locale_t> l, sptr<stmts_t> s) : frame(l, s) {}
-  // plus whatever a chain has here
 };
 
 struct if_t {
@@ -618,16 +603,47 @@ struct subexpr_t {
   sptr<expr_t> expr;
 };
 
-VAR_MACRO(operand, chain_t, fn_lit_t, if_t, complit_t, number_t, sizeof_t,
+VAR_MACRO(operand, chain_t, fn_lit_t, if_t, complit_t, number_t, sizeof_t, pipe_t,
           result_t, block_t);
-using var = var<empty_t, unresolved_t, subexpr_t, operator_t, operand_t>;
+using var = var<empty_t, unresolved_t, operator_t, operand_t>;
 } // namespace expr_s
 struct expr_elm_t : public expr_s::var {
   using expr_s::var::variant;
+  sptr<type_t> type;
+  expr_elm_t(): expr_s::var(empty_t{}), type(nullptr){}
+
+  expr_elm_t(expr_s::var v, sptr<type_t> t): expr_s::var(v), type(t){}
+  expr_elm_t(const expr_elm_t &other)
+      : expr_s::var(static_cast<const expr_s::var &>(other)), type(other.type) {
+  }
+
+  // Copy assignment operator
+  expr_elm_t &operator=(const expr_elm_t &other) {
+    if (this != &other) {
+      expr_s::var::operator=(static_cast<const expr_s::var &>(other));
+      type = other.type;
+    }
+    return *this;
+  }
 };
 struct expr_t {
   sptr<expr_elm_t> val;
-  // list<sptr<expr_elm_t>> exprs;
+  sptr<type_t> type;
+  // Copy constructor
+
+  expr_t(): val(nullptr), type(nullptr){}
+  expr_t(sptr<expr_elm_t> v, sptr<type_t> t): val(v), type(t){}
+
+  expr_t(const expr_t &other) : val(other.val), type(other.type) {}
+
+  // Copy assignment operator
+  expr_t &operator=(const expr_t &other) {
+    if (this != &other) {
+      val = other.val;
+      type = other.type;
+    }
+    return *this;
+  }
 };
 
 namespace stmt_s {
@@ -870,8 +886,10 @@ struct context_t {
   allocator_t &allocator;
   std::map<uintptr_t, resolve_callback_t> callback_map;
 
+  list<std::function<void()>> expresion_type_resolve_callbacks;
+
   using post_resolve_callback_t = std::function<void()>;
-  std::list<post_resolve_callback_t> post_resolve_callbacks;
+  std::list<post_resolve_callback_t> type_recursion_check_callbacks;
 
   std::unordered_map<uintptr_t, sptr<type_t>> expr_type_map;
   
@@ -882,13 +900,12 @@ struct context_t {
         callback_map({}), mut() {}
 
   void push_recursion_check(post_resolve_callback_t callback) {
-    post_resolve_callbacks.push_back(callback);
+    type_recursion_check_callbacks.push_back(callback);
   }
 
   template <typename T> void insert_callback(sptr<T> ptr, auto callback) {
-    mut.lock();
+    std::lock_guard<std::mutex> lock(mut);
     callback_map.insert({(uintptr_t)ptr.get_ptr(), callback});
-    mut.unlock();
   }
 
   context_t(const context_t &) = delete;
