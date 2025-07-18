@@ -43,7 +43,7 @@ struct token_buffer_t {
   auto to_index(vec<token_t>::c_it it) const -> std::size_t {
     return it.base() - this->toks.begin().base();
   }
-  auto to_index(vec<token_t>::it it) const -> std::size_t {
+  auto to_index(vec<token_t>::it it) -> std::size_t {
     return it.base() - toks.begin().base();
   }
 

@@ -1,6 +1,10 @@
 #pragma once
 
+
+#include <string>
+#include <string_view>
 #include <cstdint>
+
 namespace tokc {
 using e_type = std::int16_t;
 enum e : e_type {
@@ -22,6 +26,44 @@ enum e : e_type {
 };
 
 inline constexpr auto length() -> std::int64_t { return e::last; }
+
+constexpr inline std::string_view __token_code_str(const tokc::e tok) {
+  switch (tok) {
+#define TOKEN_VIRTUAL(code)                                                    \
+  case tokc::e::code:                                                             \
+    return #code;
+#define TOKEN_SYMBOL_SEQUENCE(spelling, code)                                  \
+  case tokc::e::code:                                                             \
+    return #code;
+#define TOKEN_ONE_CHAR(spelling, code)                                         \
+  case tokc::e::code:                                                             \
+    return #code;
+#define TOKEN_SYMETRICAL_OPEN_SEQUENCE(spelling, code, closing_code,           \
+                                       sgroup_code)                            \
+  case tokc::e::code:                                                             \
+    return #code;
+#define TOKEN_SYMETRICAL_CLOSE_SEQUENCE(spelling, code, opening_code,          \
+                                        sgroup_code)                           \
+  case tokc::e::code:                                                             \
+    return #code;
+
+#define TOKEN_PARALLEL_SEQUENCE(spelling, code, sgroup_code)\
+  case tokc::e::code:                                                             \
+    return #code;\
+  case tokc::e::sgroup_code:                                                             \
+    return #sgroup_code;
+
+#define TOKEN_BUILTIN_KEYWORD(spelling, code)                                  \
+  case tokc::e::code:                                                             \
+    return #code;
+#include "./token.def"
+  default:
+    return "ERROR";
+  }
+}
+
+std::string str(e val) { return std::string(__token_code_str(val)); }
+
 inline constexpr auto is_symetrical(const tokc::e tok) -> bool {
   switch (tok) {
 #define TOKEN_SYMETRICAL_OPEN_SEQUENCE(spelling, code, closing_code,           \

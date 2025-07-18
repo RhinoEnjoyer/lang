@@ -11,7 +11,6 @@
 #include <utility>
 
 
-//change the allocator to somthing with alignment??
 
 /* Move only container
  *  made for PODs
@@ -158,6 +157,7 @@ template <typename T> struct podlist_t {
     memcpy(begin_ + len_, &val, sizeof(T));
     ++len_;
   }
+
   void push_back_assume_size(T &val) {
     memcpy(begin_ + len_, &val, sizeof(T));
     ++len_;
@@ -219,7 +219,7 @@ template <typename T> struct podlist_t {
   }
   void pop_back() { regress(1); }
 
-  template <typename O, bool is_const> struct podlist_iterator_t {
+  struct podlist_iterator_t {
     // using iterator_category = std::contiguous_iterator_tag;
     // using difference_type = std::ptrdiff_t;
     // using value_type = T;
@@ -229,15 +229,16 @@ template <typename T> struct podlist_t {
     using iterator_category = std::contiguous_iterator_tag;
     using difference_type = std::ptrdiff_t;
     using value_type = T;
-    using pointer = typename std::conditional<is_const, const T *, T *>::type;
-    using reference = typename std::conditional<is_const, const T &, T &>::type;
+    using pointer = T *;
+    using cpointer = const T *;
+    using reference = T &;
 
     explicit podlist_iterator_t() : ptr_(nullptr) {}
     explicit podlist_iterator_t(pointer ptr) : ptr_(ptr) {}
+    explicit podlist_iterator_t(cpointer ptr) : ptr_(const_cast<pointer>(ptr)) {}
 
-    template <bool other_is_const>
-    podlist_iterator_t(const podlist_iterator_t<O, other_is_const> &other)
-        : ptr_(other.ptr_) {}
+    // template <bool other_is_const>
+    podlist_iterator_t(const podlist_iterator_t &other): ptr_(other.ptr_) {}
     // template <bool ic0, bool ic1>
     // podlist_iterator_t<ic0>(podlist_iterator_t<ic1> ptr)
     //     : ptr_(ptr.ptr_) {}
@@ -245,7 +246,8 @@ template <typename T> struct podlist_t {
     // ptr_(ptr) {}
 
     reference operator*() const { return *ptr_; }
-    pointer operator->() const { return ptr_; }
+    pointer operator->() { return ptr_; }
+    const pointer operator->() const { return ptr_; }
     podlist_iterator_t &operator++() {
       ++ptr_;
       return *this;
@@ -328,50 +330,9 @@ template <typename T> struct podlist_t {
     pointer ptr_;
   };
 
-  // template <bool is_const = false> struct span {
-  //   using iterator = podlist_iterator_t<T, is_const>;
-
-  //   iterator begin_;
-  //   iterator end_;
-
-  //   span(iterator begin, iterator end) : begin_(begin), end_(end) {}
-  //   span(iterator begin, size_t len) : begin_(begin), end_(begin + len) {}
-
-  //   span(T *bptr, T *eptr) : begin_(bptr), end_(eptr) {}
-  //   span(T *bptr, size_t len) : begin_(bptr), end_(bptr + len) {}
-
-  //   iterator begin() const { return begin_; }
-  //   iterator end() const { return end_; }
-
-  //   auto operator[](size_t index) -> T & { return *(begin_ + index); }
-  //   auto operator[](size_t index) const -> const T & {
-  //     return *(begin_ + index);
-  //   }
-
-  //   span slice(std::size_t start, std::size_t count) const {
-  //     if (start + count > size())
-  //       throw std::out_of_range("Span slice out of range");
-  //     return span(begin_ + start, count);
-  //   }
-
-  //   bool empty() const { return begin_ == end_; }
-
-  //   bool operator==(const span &other) const {
-  //     return size() == other.size() && std::equal(begin_, end_, other.begin_);
-  //   }
-
-  //   bool operator!=(const span &other) const { return !(*this == other); }
-
-  //   bool operator<(const span &other) const {
-  //     return std::lexicographical_compare(begin_, end_, other.begin_,
-  //                                         other.end_);
-  //   }
-  //   std::ptrdiff_t size() const { return end_ - begin_; }
-  // };
-
   // Define types for both const and non-const iterators
-  using iterator = podlist_iterator_t<T, false>;
-  using const_iterator = podlist_iterator_t<T, true>;
+  using iterator = podlist_iterator_t;
+  using const_iterator = const podlist_iterator_t;
 
   using it = iterator;
   using c_it = const_iterator;
@@ -391,11 +352,11 @@ template <typename T> struct podlist_t {
   }
 
   template <bool cit>
-  auto it2index(podlist_iterator_t<T, cit> it) const -> std::uint64_t {
+  auto it2index(podlist_iterator_t it) const -> std::uint64_t {
     return it.base() - begin_;
   }
   template <bool is_const, typename... Args>
-  void insert(podlist_iterator_t<T, is_const> it, Args &...args) {
+  void insert(podlist_iterator_t it, Args &...args) {
     constexpr auto arg_len = sizeof...(Args);
     auto index = it2index(it);
     insert(index, args...);

@@ -1,17 +1,48 @@
 #pragma once
+
 #include "../median_enum.hpp"
 #include "../overloaded.hpp"
 #include "../token.hpp"
 
 #include <array>
 #include <map>
+#include <stdexcept>
 #include <variant>
+//I HATE C++
+
 
 namespace grammar {
-using cursor_t = podlist_t<token_t>::c_it;
+using cursor_t = podlist_t<token_t>::it;
 
 struct node_t {
-  using final_t = cursor_t;
+  struct final_t : public cursor_t {
+    using cursor_t::cursor_t;
+
+    final_t(auto *val) : cursor_t(val) {}
+    final_t(auto &val) : cursor_t(val) {}
+    final_t(auto &&val) : cursor_t(std::move(val)) {}
+    final_t(std::nullptr_t) : cursor_t(static_cast<token_t *>(nullptr)) {}
+
+    template <tokc::e TYPE> auto &expect() {
+      auto t = this->base()->type();
+      if (t != TYPE)[[unlikely]]
+        throw std::runtime_error("Expected " + std::string(tokc::str(TYPE)) +
+                                 "but have " +
+                                 std::string(tokc::str(this->base()->type())));
+      return *this;
+    }
+
+    template <tokc::e TYPE> const auto &expect() const {
+      auto t = this->base()->type();
+      if (t != TYPE)[[unlikely]]
+        throw std::runtime_error("Expected " + std::string(tokc::str(TYPE)) +
+                                 "but have " +
+                                 std::string(tokc::str(this->base()->type())));
+      return *this;
+    }
+
+    auto type() const { return this->base()->type(); }
+  };
 
   struct median_t {
     using code_t = medianc::e;
@@ -208,7 +239,7 @@ struct node_t {
     // median_proxy_t() : node(nullptr) {}
     median_proxy_t(node_t *val) : node(val) {}
     median_proxy_t(median_proxy_t<> val) : node(val.node) {}
-    median_proxy_t(const node_t *val) : node(val) {}
+    median_proxy_t(const node_t *val) : node(const_cast<node_t *>(val)) {}
 
     using node_type = std::conditional_t<is_const, const node_t, node_t>;
     node_type *node;
@@ -232,11 +263,33 @@ struct node_t {
       node_type *b = node + 1;
       return *(node + 1);
     }
+
+    template <medianc::e TYPE> auto &expect() {
+      if (this->type() != TYPE) [[unlikely]]
+        throw std::runtime_error("Expected " + std::string(medianc::str(TYPE)) +
+                                 "but have " +
+                                 std::string(medianc::str(this->type())));
+      return *this;
+    }
+    template <medianc::e TYPE> const auto &expect() const {
+      if (this->type() != TYPE)[[unlikely]]
+        throw std::runtime_error("Expected " + std::string(medianc::str(TYPE)) +
+                                 "but have " +
+                                 std::string(medianc::str(this->type())));
+      return *this;
+    }
   };
 
   using var_t = std::variant<final_t, median_t, err_t>;
   var_t node_;
 
+  [[nodiscard]] auto as_median_opt() -> std::optional<median_proxy_t<false>> {
+    return std::optional{this};
+  }
+  [[nodiscard]] auto as_median_opt() const
+      -> std::optional<const median_proxy_t<false>> {
+    return std::optional{this};
+  }
   [[nodiscard]] auto as_median() -> median_proxy_t<false> { return {this}; }
   [[nodiscard]] auto as_median() const -> const median_proxy_t<true> {
     return {this};
@@ -297,11 +350,11 @@ struct node_t {
   [[nodiscard]] auto is_err() const noexcept -> bool {
     return std::holds_alternative<err_t>(node_);
   }
+
   [[nodiscard]] static auto make(cursor_t cursor) -> node_t {
     return node_t{final_t(cursor)};
   }
-  [[nodiscard]] static auto make(median_t::code_t type, std::int16_t len,
-                                 final_t first) -> node_t {
+  [[nodiscard]] static auto make(median_t::code_t type, std::int16_t len,final_t first) -> node_t {
     return node_t{median_t{type, len, first, first}};
   }
 };
@@ -320,7 +373,9 @@ auto entry(const token_buffer_t &toks, const std::map<size_t, size_t> &smap,
 
 //we need those to decipher the templates and anything with ambigous syntax
 auto expr(context_t &ctx, cursor_t &cursor) -> void;
-auto type(context_t &ctx, cursor_t &cursor) -> void;
 
+
+// auto type_can_infer(context_t &ctx, cursor_t &cursor) -> void;
+auto type(context_t &ctx, cursor_t &cursor) -> void;
 auto traverse(const token_buffer_t &buf, podlist_t<node_t> &buffer) -> void;
 } // namespace grammar

@@ -1,6 +1,7 @@
 #include "./frontend/lexer.hpp"
 #include "./frontend/parser.hpp"
-#include "./frontend/semantics.hpp"
+#include "./frontend/semantics2.cpp"
+// #include "./frontend/semantics.hpp"
 #include "./source_buffer.hpp"
 #include "mesure.hpp"
 #include "nicknames.hpp"
@@ -48,19 +49,20 @@ int main(int argc, char *argv[]) {
 
   auto lam = [](const std::string filepath) {
     auto src = [&filepath]() -> src_buffer_t {
-        namespace fs = std::filesystem;
-        if (!fs::exists(filepath)) {
-            std::cerr << "[[ERROR]] File \"" << filepath << "\" doesn't exist\n";
-            std::exit(EXIT_FAILURE);
-        }
-        std::cout << "Loading File: " << filepath << '\n';
-        try {
-            return src_buffer_t::make(filepath);
-        } catch (const std::exception& ex) {
-            std::cerr << "Error: " << ex.what() << '\n';
-            std::abort();
-        }
+      namespace fs = std::filesystem;
+      if (!fs::exists(filepath)) {
+        std::cerr << "[[ERROR]] File \"" << filepath << "\" doesn't exist\n";
+        std::exit(EXIT_FAILURE);
+      }
+      std::cout << "Loading File: " << filepath << '\n';
+      try {
+        return src_buffer_t::make(filepath);
+      } catch (const std::exception &ex) {
+        std::cerr << "Error: " << ex.what() << '\n';
+        std::abort();
+      }
     }();
+
     std::println("\t{}bytes\n", src.length());
 
     auto [lex_out, lex_time] = mesure([&] { return lexer::entry(&src); });
@@ -75,12 +77,12 @@ int main(int argc, char *argv[]) {
 
     auto symbol_pool = allocator_t::make();
     auto [symbols_result, symbols_time] = mesure([&] {
-      return semantics::symbols::entry(symbol_pool, lex_output, lex_symetrical_map,
-                                       *grammar_output.begin());
+      semantics::entry(symbol_pool, lex_output, lex_symetrical_map, *grammar_output.begin());
+      return 1;
     });
-    auto &[file_locale, file_stmts] = symbols_result;
+    // auto &[file_locale, file_stmts] = symbols_result;
 
-    semantics::print(file_stmts);
+    // semantics::print(file_stmts);
 
     std::cout << "\n"
               << "Lexer: " << lex_time << "\n"

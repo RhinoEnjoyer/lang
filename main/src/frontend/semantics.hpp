@@ -65,6 +65,7 @@ namespace decl_s {
 struct scope_decl_t {
   frame_t frame;
   scope_decl_t(sptr<locale_t> l, sptr<stmts_t> s) : frame(l, s) {}
+  scope_decl_t(frame_t&& f) : frame(std::move(f)) {}
   sptr<locale_t> get_locale() { return frame.locale; }
 };
 
@@ -563,7 +564,6 @@ struct pipe_t {
   sptr<expr_t> lhs;
   opt<chain_t> chain;
 };
-
 struct complit_t {
   sptr<type_t> type;
   list<sptr<expr_t>> init_vals;
@@ -881,18 +881,18 @@ struct resolve_callback_t {
 struct context_t {
   const token_buffer_t &toks;
   const std::map<size_t, size_t> &toks_symetrical_map;
-
   std::atomic_uint64_t cindex;
+
   allocator_t &allocator;
   std::map<uintptr_t, resolve_callback_t> callback_map;
-
   list<std::function<void()>> expresion_type_resolve_callbacks;
 
   using post_resolve_callback_t = std::function<void()>;
-  std::list<post_resolve_callback_t> type_recursion_check_callbacks;
+  std::list<post_resolve_callback_t> type_recursion_callbacks;
 
   std::unordered_map<uintptr_t, sptr<type_t>> expr_type_map;
-  
+  std::vector<std::function<void()>> record_field_sorting;
+
   std::mutex mut; //not needed?
 
   context_t(const token_buffer_t &t, const std::map<size_t, size_t> &tsm, allocator_t &a)
@@ -900,7 +900,7 @@ struct context_t {
         callback_map({}), mut() {}
 
   void push_recursion_check(post_resolve_callback_t callback) {
-    type_recursion_check_callbacks.push_back(callback);
+    type_recursion_callbacks.push_back(callback);
   }
 
   template <typename T> void insert_callback(sptr<T> ptr, auto callback) {

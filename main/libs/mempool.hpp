@@ -15,7 +15,6 @@ struct page_t {
   void *data;
   size_t cap;
   void *current;
-  // size_t allocated;
 
   static page_t make(size_t cap) {
     auto ptr = new std::uint8_t[cap];
@@ -56,9 +55,11 @@ struct page_t {
 
 struct mempool_t {
   using page_list = podlist_t<page_t>;
+  using destructor_list = std::vector<std::function<void()>>;
+
   std::mutex mutex;
   page_list pages;
-  std::vector<std::function<void()>> destructors;
+  destructor_list destructors;
 
   static mempool_t make() {
     auto list = page_list::create(10);
@@ -100,6 +101,13 @@ public:
     // THIS IS REALLY BAD BTW
     // THIS IS REALLY BAD BTW
     // THIS IS REALLY BAD BTW
+    // someday I will have to find a better solution
+    // hint hint use a boost::allocator or smth hint hint
+    // OR ANYTHING SOMETHING THAT WILL NOT JUST LEAVE RANDOM BLOCKS
+    // on the other hand doe
+    // we do not allocate arrays and our data types are not anything abnormal
+    // so if anything is wasted it ain't that bad
+    // that doesn't mean that I like it
     if (!ptr) {
       make_new_page();
       goto AGAIN;

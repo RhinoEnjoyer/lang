@@ -1,7 +1,6 @@
 #include "semantics.hpp"
-#include "lexer.hpp"
+#include <source_location>
 #include "parser.hpp"
-#include <bits/types/locale_t.h>
 #include <cstdint>
 #include <iostream>
 #include <ostream>
@@ -12,74 +11,6 @@
 #include <variant>
 
 namespace semantics {
-struct cursor_helper_t {
-  cursor_helper_t(const span_t s) : span_(s), cursor_(s.begin()) {}
-
-  template <auto in = medianc::any, typename in_t = decltype(in),
-            typename t = std::conditional_t<std::is_same_v<in_t, medianc::e>,
-                                            median_t, final_t>>
-  std::optional<t> extract() {
-    static_assert(std::is_same_v<in_t, medianc::e> ||
-                      std::is_same_v<in_t, tokc::e>,
-                  "in must be a medianc::e or a tokc::e");
-
-    if (!within() || !std::holds_alternative<t>(cursor_->node()))
-      return std::nullopt;
-
-    if constexpr (std::is_same_v<t, median_t>) {
-      const auto med = cursor_->as_median();
-      if constexpr (in == medianc::any) {
-        cursor_.advance();
-        return med;
-      } else {
-        if (med.type() == in) {
-          cursor_.advance();
-          return med;
-        }
-      }
-    } else if constexpr (std::is_same_v<t, final_t>) {
-      const auto fin = cursor_->as_final();
-      if constexpr (in == tokc::any) {
-        cursor_.advance();
-        return fin;
-      } else {
-        if (fin->isa(in)) {
-          cursor_.advance();
-          return fin;
-        }
-      }
-    } else {
-      static_assert(false, "input is neither a medianc::e or a tokc::e");
-    }
-    return std::nullopt;
-  }
-
-
-  template <size_t index, size_t max, auto in, auto... ins>
-  auto tuple_extract_impl(auto &tup) -> void {
-    if constexpr (index < max) {
-      std::get<index>(tup) = extract<in>();
-      if constexpr (sizeof...(ins) > 0) {
-        return tuple_extract_impl<index + 1, max, ins...>(tup);
-      }
-    }
-  }
-  template <
-      auto... ins,
-      typename ret = std::tuple<std::optional<std::conditional_t<
-          std::is_same_v<decltype(ins), medianc::e>, median_t, final_t>>...>>
-  auto tuple_extract() -> ret {
-    ret tup;
-    tuple_extract_impl<0, sizeof...(ins), ins...>(tup);
-    return tup;
-  }
-
-  bool within() const { return span_.contains(cursor_); }
-
-private:
-  span_t span_;
-  cursor_t cursor_;
-};
 
 namespace expr_s {
 auto token_to_operator(const tokc::e token) -> operator_t{
@@ -123,6 +54,7 @@ auto token_to_operator(const tokc::e token) -> operator_t{
 namespace resolve {
 auto type_fn(context_t &ctx, sptr<locale_t> locale,
              ssptr<unresolved_t, type_t> ptr) -> resolve_callback_t;
+
 auto decl_fn(context_t &ctx, sptr<locale_t> locale,
              ssptr<decl_s::unresolved_t, decl_t> ptr) -> resolve_callback_t;
 auto expr_elm_chain_fn(context_t &ctx, sptr<locale_t> locale,
@@ -149,6 +81,8 @@ auto consume_stmts_fn(context_t &ctx, sptr<locale_t> loc, sptr<stmts_t> stmts,
                       span_t span) -> void;
 auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
     -> sptr<type_t>;
+
+template<bool record_ver = false>
 auto decl_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
     -> sptr<decl_t>;
 auto expr_val_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
@@ -157,16 +91,16 @@ auto expr_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> sptr<expr_t>;
 
 template <void (*fn)(sptr<decl_t>, context_t &, sptr<locale_t>,
-                     cursor_helper_t &)>
+                     grammar::cursor_helper_t &)>
 auto decl_spec_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
     -> sptr<decl_t>;
 
 auto type_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
-                  cursor_helper_t &cursor) -> void;
+                  grammar::cursor_helper_t &cursor) -> void;
 
 template <bool allow_init_val = true>
 auto var_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
-                 cursor_helper_t &cursor) -> void;
+                 grammar::cursor_helper_t &cursor) -> void;
 
 auto todo_stmts_fn(context_t &ctx, sptr<locale_t> loc, const median_t stmt_med)
     -> sptr<stmt_t> {
@@ -352,7 +286,8 @@ struct deepcopy_t {
       return;
     }
     ovisit(
-        val.get_val(), [this](type_s::fntype_t &val) { insert2map(val); },
+        val.get_val(), 
+        [this](type_s::fntype_t &val) { insert2map(val); },
         [this](type_s::fntemplate_t &val) { insert2map(val); },
         [this](type_s::aggregate_t &val) { insert2map(val); },
         [this](type_s::indirection_t &val) { insert2map(val); },
@@ -729,9 +664,9 @@ auto get_decl_fin_fn(const bool localy_indistinct, context_t &ctx,
 
 auto get_decl_fn(const bool localy_indistinct, context_t &ctx,
                  sptr<locale_t> loc, const median_t decl_med)
-    -> std::tuple<sptr<decl_t>, cursor_helper_t> {
+    -> std::tuple<sptr<decl_t>, grammar::cursor_helper_t> {
   // ctx.dbg_add_call();
-  auto cursor = cursor_helper_t{decl_med.children()};
+  auto cursor = grammar::cursor_helper_t{decl_med.children()};
   auto name_fin = cursor.extract<tokc::ID>();
 
   // grammar ensures that for us
@@ -751,7 +686,7 @@ auto template_arg_list_fn(context_t &ctx, sptr<locale_t> loc,
   auto list = type_s::template_args_t::list_t{};
   for (auto &elm : med.children()) {
     auto med = elm.as_median().fchild().as_median();
-    auto cursor = cursor_helper_t{med.children()};
+    auto cursor = grammar::cursor_helper_t{med.children()};
     auto decl_ptr =
         get_decl_fin_fn(false, ctx, loc, cursor.extract<tokc::ID>().value());
     switch (med.type()) {
@@ -771,33 +706,22 @@ auto template_arg_list_fn(context_t &ctx, sptr<locale_t> loc,
   return {list};
 }
 
+
 auto rec_fn(context_t &ctx, sptr<locale_t> loc, const median_t rec_med)
     -> type_s::rec_t {
-  auto cursor = cursor_helper_t{rec_med.children()};
+  auto cursor = grammar::cursor_helper_t{rec_med.children()};
 
   auto body_med = cursor.extract<medianc::BODY>();
-
   auto locale = locale_t::make_child(ctx, loc);
   auto fields = type_s::rec_t::fieldholder_t{};
   auto idecls = type_s::rec_t::internaldecls_t{};
-  size_t n = 0;
   {
     auto ch = body_med->children();
-    auto cursor = cursor_helper_t{ch};
+    auto cursor = grammar::cursor_helper_t{ch};
     while (cursor.within()) {
       auto med = cursor.extract<medianc::ELEMENT>()->fchild().as_median();
-      auto dptr = decl_fn(ctx, locale, med);
-
-      if (rholds<decl_s::var_decl_t>(dptr.get_val())) {
-        //SUBHUMAN HACK
-        auto& name = dptr->name;
-        auto mptr = ctx.make_sptr<decl_t>(decl_s::field_t{dptr, n++}, name, dptr->index());
-        locale->internals.table.at(name) =
-            mptr; // REPLACE THE DECALRATION IN THE LOCALE WITH THE MEMBER ONE
-        fields.emplace_back(mptr);
-      } else {
-        idecls.emplace_back(dptr);
-      }
+      auto dptr = decl_fn<true>(ctx, locale, med);
+      idecls.emplace_back(dptr);
     }
   }
 
@@ -810,7 +734,7 @@ auto indirection_fn(context_t &ctx, sptr<locale_t> loc, const median_t in_med)
   // ctx.dbg_add_call();
   static_assert(std::is_same_v<T, type_s::ptr_t> || std::is_same_v<T, type_s::iptr_t>,
                 "indirection type must be a type_s::ptr_t or type_s::iptr_t");
-  auto cursor = cursor_helper_t{in_med.children()};
+  auto cursor = grammar::cursor_helper_t{in_med.children()};
   auto type_med = cursor.extract<medianc::TYPE>();
   return T{type_fn(ctx, loc, *type_med)};
 }
@@ -818,7 +742,7 @@ auto indirection_fn(context_t &ctx, sptr<locale_t> loc, const median_t in_med)
 auto tup_fn(context_t &ctx, sptr<locale_t> loc, const median_t tup_med)
     -> type_t {
   auto ch = tup_med.children();
-  auto types = list<sptr<type_t>>{};
+  auto types = std::vector<sptr<type_t>>{};
   for (auto &elm : ch) {
     auto elm_med = elm.as_median();
     auto elm_ch = elm_med.children();
@@ -831,7 +755,7 @@ auto tup_fn(context_t &ctx, sptr<locale_t> loc, const median_t tup_med)
 //TODO
 auto typeof_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> type_t {
-  auto cursor = cursor_helper_t{med.children()};
+  auto cursor = grammar::cursor_helper_t{med.children()};
   auto expr_med = cursor.extract<medianc::EXPR>();
   return empty_t{};
 }
@@ -839,7 +763,7 @@ auto typeof_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
 auto fntemplate_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> type_t {
   // ctx.dbg_add_call();
-  auto cursor = cursor_helper_t{med.children()};
+  auto cursor = grammar::cursor_helper_t{med.children()};
   const auto [args_med, ret_med] =
       cursor.tuple_extract<medianc::FN_ARGS, medianc::FN_RET>();
 
@@ -847,7 +771,7 @@ auto fntemplate_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
   sptr<type_t> ret_type;
   auto locale = locale_t::make_child(ctx, loc);
   {
-    auto cursor = cursor_helper_t{args_med->children()};
+    auto cursor = grammar::cursor_helper_t{args_med->children()};
     while (cursor.within()) {
       auto type_med = cursor.extract<medianc::ARGUMENT>();
       auto ptr = decl_spec_fn<var_decl_fn>(
@@ -864,7 +788,7 @@ auto fntemplate_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
 
 auto fntype_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> type_t {
-  auto cursor = cursor_helper_t{med.children()};
+  auto cursor = grammar::cursor_helper_t{med.children()};
   const auto [args_med, ret_med] =
       cursor.tuple_extract<medianc::FN_ARGS, medianc::FN_RET>();
 
@@ -872,7 +796,7 @@ auto fntype_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
   sptr<type_t> ret_type;
 
   if (args_med) {
-    auto cursor = cursor_helper_t{args_med->children()};
+    auto cursor = grammar::cursor_helper_t{args_med->children()};
     while (cursor.within()) {
       auto type_med = cursor.extract<medianc::ARGUMENT>();
       auto ptr = type_fn(ctx, loc, type_med.value().fchild().as_median());
@@ -888,7 +812,7 @@ auto fntype_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
 auto callable_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> type_t {
   // ctx.dbg_add_call();
-  auto cursor = cursor_helper_t{med.children()};
+  auto cursor = grammar::cursor_helper_t{med.children()};
   const auto [state_med, template_med, args_med, ret_med] =
       cursor.tuple_extract<medianc::FN_STATE_LIST,
                            medianc::TEMPLATE_ARGUMENT_LIST, medianc::FN_ARGS,
@@ -908,7 +832,7 @@ auto callable_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
   sptr<type_t> ret_type;
 
   if (args_med) {
-    auto cursor = cursor_helper_t{args_med->children()};
+    auto cursor = grammar::cursor_helper_t{args_med->children()};
     while (cursor.within()) {
       auto decl_med = cursor.extract<medianc::ARGUMENT>();
       // decl_spec_fn<var_decl_fn>(ctx, loc, decl_med);
@@ -943,20 +867,17 @@ struct recursion_check_context_t {
     return forbiden.insert(reinterpret_cast<uintptr_t>(ptr.get_ptr()));
   }
 
-  void enter(const sptr<type_t> &ptr) {
-    current_path.push_back(ptr);
-  }
+  void enter(const sptr<type_t> &ptr) { current_path.push_back(ptr); }
 
-  void leave() {
-    current_path.pop_back();
-  }
+  void leave() { current_path.pop_back(); }
 
   void record_cycle(const sptr<type_t> &ptr) {
     current_path.push_back(ptr);
     recursive_paths.push_back(current_path);
-    current_path.pop_back();  // remove again after recording
+    current_path.pop_back(); // remove again after recording
   }
 };
+
 bool try_insert(recursion_check_context_t &ctx, const sptr<type_t> &ptr) {
   auto [_, inserted] = ctx.insert(ptr);
   if (!inserted) {
@@ -965,16 +886,14 @@ bool try_insert(recursion_check_context_t &ctx, const sptr<type_t> &ptr) {
   }
   return true;
 }
-void recursion_check(recursion_check_context_t& ctx, const type_s::rec_t &rec,
+void recursion_check(recursion_check_context_t &ctx, const type_s::rec_t &rec,
                      const sptr<type_t> holder);
-void recursion_check(recursion_check_context_t& ctx,
+void recursion_check(recursion_check_context_t &ctx,
                      const type_s::type_ref_t &tref, const sptr<type_t> holder);
-void recursion_check(recursion_check_context_t& ctx, 
-                      const type_s::tup_t &tup,
+void recursion_check(recursion_check_context_t &ctx, const type_s::tup_t &tup,
                      const sptr<type_t> holder);
-void recursion_check(recursion_check_context_t& ctx,
-                     const type_s::aggregate_t &agg,
-                     const sptr<type_t> holder);
+void recursion_check(recursion_check_context_t &ctx,
+                     const type_s::aggregate_t &agg, const sptr<type_t> holder);
 
 void defvisit(const auto &val) {
   std::println(std::cerr, "type:{}", boost::core::demangled_name(typeid(val)));
@@ -1074,6 +993,51 @@ void type_ref_recursion_check(const type_s::type_ref_t& tref, sptr<type_t> holde
   run_recursion_check(tref, holder, recursion_check);
 }
 
+auto rec_sorting_impl_base(context_t& ctx, sptr<type_t> ptr, type_s::rec_t& rec, std::vector<size_t>& indices){
+  for (size_t i = 0; i < rec.idecls.size(); ++i) {
+    auto &elm = rec.idecls[i];
+    if (rholds<decl_s::field_t>(*elm))
+      indices.push_back(i);
+  }
+  for (size_t i = 0; i < rec.idecls.size(); ++i) {
+    auto &elm = rec.idecls[i];
+    if (rholds<decl_s::field_t>(*elm))
+      indices.push_back(i);
+  }
+  rec.fields.reserve(indices.size());
+  for (const auto &elm : indices) {
+    rec.fields.push_back(rec.idecls.at(elm));
+  }
+}
+
+void rec_sorting_impl_scope(context_t& ctx, sptr<type_t> ptr, type_s::rec_t& rec, decl_s::scope_decl_t& scope){
+  for (auto &elm : scope.frame.stmts->stmts) {
+    if (rholds<sptr<decl_t>>(*elm)) {
+      auto decl = std::get<sptr<decl_t>>(*elm);
+      if (rholds<decl_s::var_decl_t>(*decl)) {
+        rec.fields.push_back(decl);
+      }else if(rholds<decl_s::scope_decl_t>(*decl)){
+        auto scope = std::get<decl_s::scope_decl_t>(*decl);
+        rec_sorting_impl_scope(ctx, ptr, rec, scope);
+      }
+    }
+  }
+}
+auto rec_sorting(context_t &ctx, sptr<type_t> ptr) -> void {
+  auto indices = std::vector<size_t>{};
+  auto &rec =
+      std::get<type_s::rec_t>(std::get<type_s::aggregate_t>(ptr.get_val()));
+
+  for (size_t i = 0; i < rec.idecls.size(); ++i) {
+    auto &elm = rec.idecls[i];
+    if (rholds<decl_s::field_t>(*elm))
+      indices.push_back(i);
+  }
+  rec.fields.reserve(indices.size());
+  for (const auto &elm : indices) {
+    rec.fields.push_back(rec.idecls.at(elm));
+  }
+}
 auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
     -> sptr<type_t> {
   const auto node = type_med.children().begin()->node();
@@ -1109,8 +1073,6 @@ auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
           ctx.insert_callback(
               ptr,
               resolve::type_fn(ctx, loc, ssptr<unresolved_t, type_t>(ptr)));
-          // ctx.callbacks.push_back(
-          //     resolve::type_fn(ctx, loc, ssptr<unresolved_t, type_t>(ptr)));
           return unresolved_t{val};
         }
         case medianc::FN_SIG:
@@ -1127,9 +1089,28 @@ auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
           auto rec = rec_fn(ctx, loc, val);
           ctx.push_recursion_check([&ctx, ptr]() -> void {
             // this could be a problem for templates???
-            auto rec = std::get<type_s::rec_t>(
-                std::get<type_s::aggregate_t>(ptr.get_val()));
+            auto rec = std::get<type_s::rec_t>(std::get<type_s::aggregate_t>(ptr.get_val()));
             rec_recursion_check(rec, ptr);
+          });
+
+          ctx.record_field_sorting.push_back(
+          [&ctx, ptr]() -> void {
+            auto indices = std::vector<size_t>{};
+            auto &rec = std::get<type_s::rec_t>(
+                std::get<type_s::aggregate_t>(ptr.get_val()));
+
+            for (size_t i = 0; i < rec.idecls.size(); ++i) {
+              auto &elm = rec.idecls[i];
+              if (rholds<decl_s::field_t>(*elm))
+                indices.push_back(i);
+            }
+            rec.fields.reserve(indices.size());
+            for (const auto &elm : indices) {
+              rec.fields.push_back(rec.idecls.at(elm));
+            }
+            for (const auto &elm : indices) {
+              rec.idecls.erase(rec.idecls.begin() + elm);
+            }
           });
           return rec;
         }
@@ -1152,11 +1133,10 @@ auto type_fn(context_t &ctx, sptr<locale_t> loc, const median_t type_med)
 //  functions which kindof complicates things
 template <bool allow_init_val>
 auto var_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
-                 cursor_helper_t &cursor) -> void {
-
-
+                 grammar::cursor_helper_t &cursor) -> void {
   const auto [mut_fin, type_med, val_med] =
       cursor.tuple_extract<tokc::any, medianc::TYPE, medianc::VALUE>();
+
   const auto mut_val = [&mut_fin] -> bool {
     constexpr bool default_mut = false;
     if (mut_fin && mut_fin->base()->isa(tokc::BUILTIN_IMMUTABLE))
@@ -1178,13 +1158,13 @@ auto var_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
                  type_med->fchild().as_median().type() == medianc::CHAIN) {
         // we can't resolve without it having effects on the value so we move
         // this to the callback stage
-        // we asign a monostate to the ptr or unresolved
+        // asign unresolved
         *ptr = decl_s::unresolved_t{type_med->fchild().as_median(), val_med};
         ctx.insert_callback(ptr, resolve::decl_fn(ctx, loc, ptr));
         return;
       } else {
-        type_val = type_fn(ctx, loc,
-                           type_med.value()); // resolve the literal type
+        type_val =
+            type_fn(ctx, loc, type_med.value()); // resolve the literal type
       }
 
       sptr<expr_t> init_val;
@@ -1229,7 +1209,7 @@ auto var_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
 }
 
 auto scope_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
-                   cursor_helper_t &cursor) -> void {
+                   grammar::cursor_helper_t &cursor) -> void {
   sptr<locale_t> locale;
   sptr<stmts_t> stmts;
   if (std::holds_alternative<decl_s::scope_decl_t>(*ptr)) {
@@ -1246,7 +1226,7 @@ auto scope_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
 }
 
 auto fn_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
-                cursor_helper_t &cursor) -> void {
+                grammar::cursor_helper_t &cursor) -> void {
   auto [sig_med, body_med] =
       cursor.tuple_extract<medianc::FN_SIG, medianc::BODY>();
   auto callable_type = callable_fn(ctx, loc, sig_med.value());
@@ -1260,7 +1240,7 @@ auto fn_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
 }
 
 auto type_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
-                  cursor_helper_t &cursor) -> void {
+                  grammar::cursor_helper_t &cursor) -> void {
   auto [template_args_med, type_med] =
       cursor.tuple_extract<medianc::TEMPLATE_ARGUMENT_LIST, medianc::TYPE>();
   auto type = sptr<type_t>{nullptr};
@@ -1284,7 +1264,7 @@ auto type_decl_fn(sptr<decl_t> ptr, context_t &ctx, sptr<locale_t> loc,
 }
 
 template <void (*fn)(sptr<decl_t>, context_t &, sptr<locale_t>,
-                     cursor_helper_t &)>
+                     grammar::cursor_helper_t &)>
 auto decl_spec_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
     -> sptr<decl_t> {
   constexpr auto localy_indistinct = (fn != scope_decl_fn);
@@ -1298,7 +1278,7 @@ auto decl_spec_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
 auto unwrap_decl_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
     -> sptr<stmt_t> {
   // ctx.dbg_add_call();
-  auto cursor = cursor_helper_t(decl_med.children());
+  auto cursor = grammar::cursor_helper_t(decl_med.children());
   const auto [ids_med, body_med] =
       cursor.tuple_extract<medianc::UNWRAP_IDS, medianc::UNWRAP_BODY>();
 
@@ -1323,7 +1303,7 @@ auto unwrap_decl_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
 
 auto import_fn(context_t &ctx, const median_t import_med) -> sptr<stmt_t> {
   // ctx.dbg_add_call();
-  auto cursor = cursor_helper_t{import_med.children()};
+  auto cursor = grammar::cursor_helper_t{import_med.children()};
   auto strlit_node = cursor.extract<tokc::STRLIT>();
 
   return ctx.make_sptr<stmt_t>(
@@ -1333,7 +1313,7 @@ auto import_fn(context_t &ctx, const median_t import_med) -> sptr<stmt_t> {
 auto forloop_fn(context_t &ctx, sptr<locale_t> ploc, const median_t for_med)
     -> sptr<stmt_t> {
   // ctx.dbg_add_call();
-  auto cursor = cursor_helper_t{for_med.children()};
+  auto cursor = grammar::cursor_helper_t{for_med.children()};
   auto [ctrl_expr_med, body_med] =
       cursor.tuple_extract<medianc::CTRL_EXPR, medianc::BODY>();
 
@@ -1342,7 +1322,7 @@ auto forloop_fn(context_t &ctx, sptr<locale_t> ploc, const median_t for_med)
   sptr<stmts_t> ctrl_expr_stmts;
   {
     auto stmt_list = ctx.make_sptr(stmts_t{});
-    auto cursor = cursor_helper_t{ctrl_expr_med->children()};
+    auto cursor = grammar::cursor_helper_t{ctrl_expr_med->children()};
 
     auto [decl_med, cmp_expr_med, it_expr_med] =
         cursor.tuple_extract<medianc::DECL, medianc::EXPR, medianc::EXPR>();
@@ -1417,7 +1397,7 @@ auto block_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> expr_s::block_t {
   auto locale = locale_t::make_child(ctx, loc);
   auto stmts = ctx.make_sptr(stmts_t{});
-  auto cursor = cursor_helper_t{med.children()};
+  auto cursor = grammar::cursor_helper_t{med.children()};
 
   auto body_med = cursor.extract<medianc::BODY>();
   consume_stmts_fn(ctx, locale, stmts, body_med->children());
@@ -1427,7 +1407,7 @@ auto block_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
 
 auto result_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> expr_s::result_t {
-  auto cursor = cursor_helper_t{med.children()};
+  auto cursor = grammar::cursor_helper_t{med.children()};
 
   auto body_med = cursor.extract<medianc::BODY>();
   auto expr_ptr = expr_fn(ctx, loc, body_med.value().fchild().as_median());
@@ -1460,7 +1440,7 @@ auto sizeof_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
 
 auto complit_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> expr_s::var {
-  auto cursor = cursor_helper_t{med.children()};
+  auto cursor = grammar::cursor_helper_t{med.children()};
   auto [ctype_med, cinit_med] =
       cursor.tuple_extract<medianc::COMPOUND_LITERAL_TYPE,
                            medianc::COMPOUND_LITERAL_INIT>();
@@ -1497,7 +1477,7 @@ auto complit_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
 
 auto if_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> expr_s::if_t {
-  auto cursor = cursor_helper_t{med.children()};
+  auto cursor = grammar::cursor_helper_t{med.children()};
   auto val = expr_s::if_t{{}};
   bool one_else = false;
   while (cursor.within()) {
@@ -1508,7 +1488,7 @@ auto if_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
                                " This shouldn't happen");
 
     if (var_med->type() == medianc::IF) {
-      auto cursor = cursor_helper_t{var_med->children()};
+      auto cursor = grammar::cursor_helper_t{var_med->children()};
       auto [ctrl_expr_med, body_med] =
           cursor.tuple_extract<medianc::CTRL_EXPR, medianc::BODY>();
       auto elif = expr_s::if_t::if_link_t{nullptr, ctx.make_sptr(stmts_t{})};
@@ -1529,7 +1509,7 @@ auto if_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
 
       one_else = true;
       auto body_med =
-          cursor_helper_t{var_med->children()}.extract<medianc::BODY>();
+          grammar::cursor_helper_t{var_med->children()}.extract<medianc::BODY>();
       auto el = expr_s::if_t::if_link_t{{nullptr}, ctx.make_sptr(stmts_t{})};
       consume_stmts_fn(ctx, loc, el.stmts, body_med->children());
       val.ifs.push_back({el});
@@ -1689,7 +1669,7 @@ auto expr_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
 auto ret_fn(context_t &ctx, sptr<locale_t> loc, const median_t med)
     -> sptr<stmt_t> {
   // ctx.dbg_add_call();
-  auto expr_med = cursor_helper_t(med.children()).extract<medianc::EXPR>();
+  auto expr_med = grammar::cursor_helper_t(med.children()).extract<medianc::EXPR>();
   return ctx.make_sptr<stmt_t>(
       stmt_s::ret_t{expr_fn(ctx, loc, expr_med.value())});
 }
@@ -1702,12 +1682,21 @@ auto break_fn(context_t &ctx, sptr<locale_t> loc, const median_t med) -> sptr<st
   return ctx.make_sptr<stmt_t>(stmt_s::break_t{expr_ptr});
 }
 
+template<bool record_ver>
 auto decl_fn(context_t &ctx, sptr<locale_t> loc, const median_t decl_med)
     -> sptr<decl_t> {
   const auto type = decl_med.type();
   switch (type) {
   case medianc::DECL:
-    return decl_spec_fn<var_decl_fn>(ctx, loc, decl_med);
+    if constexpr (!record_ver) {
+      return decl_spec_fn<var_decl_fn>(ctx, loc, decl_med);
+    } else {
+      auto raw = decl_spec_fn<var_decl_fn>(ctx, loc, decl_med);
+      auto newptr = ctx.make_sptr<decl_t>(decl_s::field_t{raw}, raw->name,
+                                   raw->index());
+      loc->internals.table.at(raw->name) = newptr;
+      return newptr;
+    }
   case medianc::FN_DECL:
     return decl_spec_fn<fn_decl_fn>(ctx, loc, decl_med);
   case medianc::SCOPE_DECL:
@@ -1726,14 +1715,11 @@ auto stmt_fn(context_t &ctx, sptr<locale_t> loc, const median_t stmt_med)
     const auto &med = n.as_median();
     const auto type = med.type();
     switch (type) {
-    case medianc::DECL:
-      return ctx.make_sptr<stmt_t>(decl_spec_fn<var_decl_fn>(ctx, loc, med));
-    case medianc::FN_DECL:
-      return ctx.make_sptr<stmt_t>(decl_spec_fn<fn_decl_fn>(ctx, loc, med));
-    case medianc::SCOPE_DECL:
-      return ctx.make_sptr<stmt_t>(decl_spec_fn<scope_decl_fn>(ctx, loc, med));
-    case medianc::TYPE_DECL:
-      return ctx.make_sptr<stmt_t>(decl_spec_fn<type_decl_fn>(ctx, loc, med));
+    case medianc::DECL:[[fallthrough]];
+    case medianc::FN_DECL:[[fallthrough]];
+    case medianc::SCOPE_DECL:[[fallthrough]];
+     case medianc::TYPE_DECL:
+      return ctx.make_sptr<stmt_t>(decl_fn(ctx, loc, med));
     case medianc::UNWRAP_DECL:
       return unwrap_decl_fn(ctx, loc, med);
     case medianc::FOR:
@@ -1772,8 +1758,7 @@ auto consume_stmts_fn(context_t &ctx, sptr<locale_t> loc, sptr<stmts_t> stmts,
     (stmts->stmts).push_back(stmt_fn(ctx, loc, elm.as_median()));
 }
 
-__attribute__((visibility("default"))) auto
-entry(allocator_t &allocator, 
+__attribute__((visibility("default"))) auto entry(allocator_t &allocator, 
       const token_buffer_t &toks,
       const std::map<size_t, size_t> &toks_symetrical_map,
       grammar::node_t &root_node) 
@@ -1789,13 +1774,12 @@ entry(allocator_t &allocator,
 
   for (auto &callback : ctx.callback_map)
     callback.second();
-
-  for (const auto &callback : ctx.type_recursion_check_callbacks)
+  for (const auto &callback : ctx.type_recursion_callbacks)
     callback();
-
+  for (const auto &callback : ctx.record_field_sorting)
+    callback();
   for (const auto &callback : ctx.expresion_type_resolve_callbacks)
     callback();
-
 
   return std::tuple{locale, stmts};
 }
@@ -1878,7 +1862,7 @@ auto template_init_input_res(context_t &ctx, sptr<locale_t> locale,
     throw std::runtime_error(
         "Template init list doesn't match the input count of the template");
 
-  auto cursor = cursor_helper_t{ch}; // we get ambigous medians out of this
+  auto cursor = grammar::cursor_helper_t{ch}; // we get ambigous medians out of this
 
   using elm_t = template_init_list_t::template_elm_t;
   template_init_list_t tlist;
@@ -1928,11 +1912,12 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
               "Only IDs are supported in unresoved symbols");
 
         const auto str = ctx.toks.str(val);
-        auto lookup = (doancestor == true)
-                          ? locale_t::ancestor_lookup(locale, str)
-                          : locale_t::local_lookup(locale, str);
+        constexpr auto lookup_fn = (doancestor == true)
+                                       ? locale_t::ancestor_lookup
+                                       : locale_t::local_lookup;
+        auto lookup = lookup_fn(locale, str);
 
-        if (!lookup.found) [[unlikely]] {
+            if (!lookup.found) [[unlikely]] {
           throw std::runtime_error("Failed to find symbol " + std::string(str) +
                                    " path: ");
         }
@@ -1978,8 +1963,8 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
               return type_impl_fn<false>(ctx, val.get_locale(), it.next(), end);
             },
             [&](decl_s::template_type_input_t &val) -> sptr<type_t> {
-              return ctx.make_sptr<type_t>(
-                  type_s::template_type_input_t{lookup.symbol});
+              //why
+              return ctx.make_sptr<type_t>(type_s::template_type_input_t{lookup.symbol});
             },
             [&](decl_s::type_decl_t &val) -> sptr<type_t> {
               if (it.next() >= end)
@@ -1998,8 +1983,8 @@ auto type_impl_fn(context_t &ctx, sptr<locale_t> locale, span_t::iterator it,
                               "Not supported aggregate type");
                         });
                   },
-                  [&](type_s::type_ref_t &val) -> sptr<type_t> {
-                    return val.ref;
+                  [&](type_s::type_ref_t &) -> sptr<type_t> {
+                    return val.type;
                   },
                   [&](unresolved_t &v) -> sptr<type_t> {
                     auto lookup =
@@ -2178,11 +2163,14 @@ auto decl_fn(context_t &ctx, sptr<locale_t> locale,
 
 
 namespace chain_state {
-auto invalid(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
-             cursor_t &cursor) -> void {
-  throw std::runtime_error("Invalid state");
+  auto invalid(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
+    cursor_t &cursor,
+    const std::source_location& location = std::source_location::current()) -> void {
+    throw std::runtime_error("Invalid state at " +
+                             std::string(location.file_name()) + ":" +
+                             std::to_string(location.line()) + " \nin function " +
+                             std::string(location.function_name()));
 }
-
 auto resolve_symbol(context_t &ctx, sptr<locale_t> locale, final_t final)
     -> sptr<decl_t> {
   const auto name = ctx.toks.str(final);
@@ -2211,6 +2199,7 @@ void index(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
            cursor_t &cursor, expr_s::chain_t &chain, median_t &med,
            ssptr<type_s::indirection_t, type_t> ptr);
 
+template<bool advance = true>
 void deref(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
            cursor_t &cursor, expr_s::chain_t &chain,
            ssptr<type_s::indirection_t, type_t> ptr);
@@ -2219,15 +2208,29 @@ void handle_after_var_and_member(context_t &ctx, sptr<locale_t> locale,
                                  const span_t &ch, cursor_t &cursor,
                                  expr_s::chain_t &chain, sptr<type_t> type);
 
+template<bool advance>
 void deref(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
            cursor_t &cursor, expr_s::chain_t &chain, ssptr<type_s::indirection_t, type_t> ptr) {
   auto [depth, type] = symbols::indirection_final(ptr.ptr(), 0, 1);
   chain.chain.emplace_back(expr_s::post::deref_t{type});
 
-  cursor.advance();
-  if (!ch.contains(cursor))
-    return;
+  if constexpr (advance) {
+    cursor.advance();
+    if (!ch.contains(cursor))
+      return;
+  }
 
+  // this allows us to use anything and allow it to continue
+  // but eventhough it works it would be a good idea that any variable
+  // is able to just continue and not need to explicitly dereference so you
+  // can access it's members (aka VAR~::MEM -> VAR::MEM) we can keep both
+  // methods and the same structure as well. The main problem comes when we
+  // use stacking indirection, how do we handle that????. Do we just limit
+  // it to single indirection??. Typicaly when someone has stacking
+  // indirection it is a md array, so I think we can assume that if we have
+  // single indirection we can deref. No real person uses a ***int  for
+  // storing single values right?
+  //
   handle_after_var_and_member(ctx, locale, ch, cursor, chain, type);
 }
 
@@ -2235,7 +2238,7 @@ void index(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
            cursor_t &cursor, expr_s::chain_t &chain, median_t &med,
            ssptr<type_s::indirection_t, type_t> ptr) {
   auto exprs = list<sptr<expr_t>>{};
-  auto med_cursor = cursor_helper_t{med.children()};
+  auto med_cursor = grammar::cursor_helper_t{med.children()};
   while (med_cursor.within()) {
     auto med = med_cursor.extract<medianc::EXPR>();
     auto ptr = semantics::symbols::expr_fn(ctx, locale, med.value());
@@ -2256,9 +2259,24 @@ void index(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
 
   handle_after_var_and_member(ctx, locale, ch, cursor, chain, type);
 }
+
 void handle_after_var_and_member(context_t &ctx, sptr<locale_t> locale,
                                  const span_t &ch, cursor_t &cursor,
                                  expr_s::chain_t &chain, sptr<type_t> type) {
+
+  if (!(cursor->is_final() && cursor->as_final()->isa(tokc::PERISPOMENI)) &&
+      rholds<type_s::indirection_t>(*type)) {
+    const auto &ind = std::get<type_s::indirection_t>(*type);
+    if (rholds<type_s::iptr_t>(ind) || rholds<type_s::ptr_t>(ind)) {
+      auto [depth, under_type] = symbols::indirection_final(type, 0, 1);
+      (void)depth;
+      if (rholds<type_s::aggregate_t>(*under_type)) {
+        chain.chain.emplace_back(expr_s::post::deref_t{under_type});
+        type = under_type;
+      }
+    }
+  }
+
   if (cursor->is_final()) {
     auto fin = cursor->as_final();
     if (rholds<type_s::aggregate_t, type_s::rec_t>(*type)) {
@@ -2272,7 +2290,15 @@ void handle_after_var_and_member(context_t &ctx, sptr<locale_t> locale,
           [&](decl_s::scope_decl_t &) {
             scope(ctx, ch, cursor, chain, symbol);
           },
-          [&](auto &val) { invalid(ctx, locale, ch, cursor); });
+          [&](auto &val) {
+            std::println(std::cerr, "type:{}",
+                         boost::core::demangled_name(typeid(val)));
+            invalid(ctx, locale, ch, cursor);
+          });
+    } else if (rholds<type_s::type_ref_t>(*type)) {
+      auto next_type = std::get<type_s::type_ref_t>(*type);
+      return handle_after_var_and_member(ctx, locale, ch, cursor, chain,
+                                         next_type.ref);
     } else if (fin->isa(tokc::PERISPOMENI) &&
                rholds<type_s::indirection_t>(*type)) {
       return deref(ctx, locale, ch, cursor, chain, type);
@@ -2363,9 +2389,15 @@ void scope(context_t &ctx, const span_t &ch, cursor_t &cursor,
       [&](decl_s::fn_decl_t &) {
         function(ctx, locale, ch, cursor, chain, symbol);
       },
-      [&](auto &val) { invalid(ctx, locale, ch, cursor); });
+      [&](auto &val) {
+        std::println(std::cerr, "type:{}",
+                     boost::core::demangled_name(typeid(val)));
+
+        invalid(ctx, locale, ch, cursor);
+      });
 }
 
+// this function decides what type of symbol can be first one a chain
 void entry(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
            cursor_t &cursor, expr_s::chain_t &chain) {
   auto symbol = resolve_symbol(ctx, locale, cursor->as_final());
@@ -2377,7 +2409,14 @@ void entry(context_t &ctx, sptr<locale_t> locale, const span_t &ch,
       [&](decl_s::var_decl_t &) {
         chain_state::var(ctx, locale, ch, cursor, chain, symbol);
       },
-      [&](auto &val) { invalid(ctx, locale, ch, cursor); });
+      [&](decl_s::fn_decl_t &) {
+        chain_state::function(ctx, locale, ch, cursor, chain, symbol);
+      },
+      [&](auto &val) {
+        std::println(std::cerr, "Invalid Symbol Type:{}",
+                     boost::core::demangled_name(typeid(val)));
+        invalid(ctx, locale, ch, cursor);
+      });
 }
 }; // namespace chain_state
 
@@ -2429,13 +2468,11 @@ auto expresion_elm_operator_fn(context_t &ctx, sptr<locale_t> locale,
       [&](expr_s::uop_t &val) -> sptr<type_t> {
         expresion_elm_fn(ctx, locale, val.operand);
         auto operand_type = val.operand->type;
-        if(meta.op == expr_s::op_operation_e::ADDRESS){
+        if (meta.op == expr_s::op_operation_e::ADDRESS) {
           return ctx.make_sptr<type_t>(type_s::ptr_t{operand_type});
-        }
-        else if(meta.op == expr_s::op_operation_e::AS){
-          //maybe add a check here?
+        } else if (meta.op == expr_s::op_operation_e::AS) {
           return payload.as.type;
-        }else{
+        } else {
           return operand_type;
         }
       },

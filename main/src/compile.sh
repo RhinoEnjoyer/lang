@@ -4,12 +4,13 @@ COMPLILER='clang++'
 
 # -s -fvisibility=hidden -flto
 FLAGS='-std=c++23 -Wno-c++20-extensions -Wno-c++23-extensions'
-# FLAGS="$FLAGS -s -fvisibility=hidden -flto"
+FLAGS="$FLAGS -s -fvisibility=hidden -flto"
 # FLAGS="$FLAGS -S -emit-llvm"
-OLVL='-O0'
+OLVL='-O3'
 GLVL='-g3'
 LLVM_CONF='-lLLVM-19'
 # LLVM_CONF=`llvm-config --cxxflags --ldflags --libs --system-libs` #no exceptions no unwinding tables --std=C++17
+# 
 
 WORKING_DIR="$(pwd)"
 LIBS_DIR="$(dirname "$WORKING_DIR")/libs"
@@ -22,13 +23,13 @@ front(){
   echo "Compiling the frontend"
     $COMPLILER $GLVL $OLVL $FLAGS --shared -o lexer.so ./frontend/lexer.cpp -fPIC &
     $COMPLILER $GLVL $OLVL $FLAGS --shared -o parser.so ./frontend/parser.cpp -fPIC &
-    $COMPLILER $GLVL $OLVL $FLAGS --shared -o semantics.so ./frontend/semantics.cpp -fPIC &
-    $COMPLILER $GLVL $OLVL $FLAGS --shared -o semantics_print.so ./frontend/semantics_print.cpp -fPIC &
+    # $COMPLILER $GLVL $OLVL $FLAGS --shared -o semantics.so ./frontend/semantics.cpp -fPIC &
+    # $COMPLILER $GLVL $OLVL $FLAGS --shared -o semantics_print.so ./frontend/semantics_print.cpp -fPIC &
   wait
 }
 
 front
 
 echo "Compiling Main"
-$COMPLILER $GLVL $OLVL $FLAGS $LLVM_CONF  -o $EXEC_NAME  ./main.cpp ./semantics.so ./parser.so ./lexer.so ./semantics_print.so  -lboost_program_options
+$COMPLILER  $GLVL $OLVL $FLAGS $LLVM_CONF  -o $EXEC_NAME ./main.cpp ./parser.so ./lexer.so   -lboost_program_options
 

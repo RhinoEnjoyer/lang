@@ -19,6 +19,7 @@ namespace lexer {
 #define DISPATCH_ARGS_DECL                                                     \
   lexer_t &lexer, const llvm::StringRef src, const pos_t bpos, pos_t pos
 #define DISPATCH_ARGS lexer, src, bpos, pos
+#define DISPATCH_FNSIG (DISPATCH_ARGS_DECL) -> DISPATCH_RETURN
 
 #define asign2table(table, index, val) table[index] = val
 constexpr auto one_char_tok_lut = [] consteval {
@@ -35,7 +36,7 @@ constexpr auto one_char_tok_lut = [] consteval {
   return table;
 }();
 
-using dispatch_fn_t = auto(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN;
+using dispatch_fn_t = auto DISPATCH_FNSIG;
 using dispatch_table_t = std::array<dispatch_fn_t *, 256>;
 
 constexpr auto symbol_sequence_bytes = [] consteval {
@@ -209,10 +210,10 @@ vwhitespace(lexer_t &lexer, llvm::StringRef src, pos_t &pos) -> void {
 // };
 
 namespace dispatch {
-auto next(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN;
+auto next DISPATCH_FNSIG;
 
 [[clang::noinline]]
-auto err(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto err DISPATCH_FNSIG {
   std::cerr << "Line: " << lexer.line_ << '\n';
   std::cerr << "Error: Unexpected char \' " << src[pos] << " \' at index "
                << pos << '\n';
@@ -225,9 +226,9 @@ auto err(const std::string_view s, DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 
   std::exit(EXIT_FAILURE);
 }
-auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN;
+auto symbol DISPATCH_FNSIG;
 
-auto comment(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto comment DISPATCH_FNSIG {
   if (pos + 1 < src.size() && src[pos + 1] == '/') {
     pos += 2;
     while (pos < src.size() && src[pos] != '\n')
@@ -240,7 +241,7 @@ auto comment(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 }
 
 // acording to perf my biggest bottleneck is this one
-auto id(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto id DISPATCH_FNSIG {
   const auto text = lex::word(src, pos);
 
   if (LLVM_UNLIKELY(text.size() == 0))
@@ -250,7 +251,7 @@ auto id(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   lexer.push(type, bpos, pos);
   become next(DISPATCH_ARGS);
 }
-auto integral_id(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto integral_id DISPATCH_FNSIG {
   const auto text = lex::word(src, pos);
 
   if (LLVM_UNLIKELY(text.size() == 0))
@@ -281,7 +282,7 @@ auto integral_id(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   become next(DISPATCH_ARGS);
 }
 
-auto number(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto number DISPATCH_FNSIG {
   auto text = lex::number(src, pos);
   if (LLVM_UNLIKELY(text.size() == 0))
     return err("Number needs to have numbers in it", DISPATCH_ARGS);
@@ -348,7 +349,7 @@ AGAIN:
 //  sort them by length
 //  match usinging that list
 
-auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto symbol DISPATCH_FNSIG {
   auto text = lex::symbol(src, pos);
   if (LLVM_UNLIKELY(text.size() == 0))
     return err("Symbol string needs to have symbols in it", DISPATCH_ARGS);
@@ -380,7 +381,7 @@ auto symbol(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   become next(DISPATCH_ARGS);
 }
 
-template <auto &fn> auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+template <auto &fn> auto onechar DISPATCH_FNSIG {
   const tokc::e t = one_char_tok_lut[src[pos]];
   // CCHECK(LLVM_UNLIKELY(t == tokc::e::ERROR));
   fn(t, DISPATCH_ARGS);
@@ -390,7 +391,7 @@ template <auto &fn> auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 
   become next(DISPATCH_ARGS);
 }
-// static auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+// static auto onechar DISPATCH_FNSIG {
 //   auto t = one_char_tok_lut[src[pos]];
 //   // CCHECK(LLVM_UNLIKELY(t == tokc::e::ERROR));
 //   // create token
@@ -406,7 +407,7 @@ template <auto &fn> auto onechar(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 // open and close checks
 namespace symetrical {
 
-auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto open DISPATCH_FNSIG {
   static constexpr auto fn = [](tokc::e r,
                                 DISPATCH_ARGS_DECL) constexpr -> void {
     lexer.openstack_.push_back(
@@ -416,7 +417,7 @@ auto open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   become onechar<fn>(DISPATCH_ARGS);
 }
 
-auto brace_open(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto brace_open DISPATCH_FNSIG {
   if (pos + 1 < src.size() && src[pos + 1] == '[') [[unlikely]] {
     lexer.openstack_.push_back({tokc::RDBRACE, lexer.buffer_.toks.size()});
     // lexer.openstack_.push_back({symetrical_table[src[pos]],
@@ -443,7 +444,7 @@ static constexpr auto close_check = [](tokc::e r,
   return val;
 };
 
-auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto close DISPATCH_FNSIG {
   {
     // auto t = one_char_tok_lut[src[pos]];
     auto val = close_check(one_char_tok_lut[src[pos]], DISPATCH_ARGS);
@@ -465,7 +466,7 @@ auto close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   // become onechar<fn>(DISPATCH_ARGS);
 }
 
-auto brace_close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto brace_close DISPATCH_FNSIG {
   if (pos + 1 < src.size() && src[pos + 1] == ']') [[unlikely]] {
     pos++;
     close_check(tokc::RDBRACE, DISPATCH_ARGS);
@@ -487,7 +488,7 @@ auto brace_close(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
 // add a recovery token so we can continiue lexing
 } // namespace symetrical
 
-auto scolon(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto scolon DISPATCH_FNSIG {
   {
     // auto t = one_char_tok_lut[src[pos]];
     lexer.push(tokc::ENDSTMT, bpos, pos + 1);
@@ -501,7 +502,7 @@ auto scolon(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   // become onechar<fn>(DISPATCH_ARGS);
 }
 
-auto builtin(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto builtin DISPATCH_FNSIG {
   ++pos;
   auto text = lex::word(src, pos);
   // for some reason this gave us big perfomance boost
@@ -520,15 +521,15 @@ auto builtin(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
   become next(DISPATCH_ARGS);
 }
 
-auto hwhitespace(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto hwhitespace DISPATCH_FNSIG {
   lex::hwhitespace(src, pos);
   become next(DISPATCH_ARGS);
 }
-auto vwhitespace(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto vwhitespace DISPATCH_FNSIG {
   lex::vwhitespace(lexer, src, pos);
   become next(DISPATCH_ARGS);
 }
-auto strlit(DISPATCH_ARGS_DECL) -> DISPATCH_RETURN {
+auto strlit DISPATCH_FNSIG {
   // err(__PRETTY_FUNCTION__,DISPATCH_ARGS);
   ++pos;
   while (pos < src.size() && src[pos] != '\"')
