@@ -10,9 +10,8 @@
 #include <variant>
 //I HATE C++
 
-
 namespace grammar {
-using cursor_t = podlist_t<token_t>::it;
+using cursor_t = podlist_t<token_t>::c_it; 
 
 struct node_t {
   struct final_t : public cursor_t {
@@ -46,6 +45,7 @@ struct node_t {
 
   struct median_t {
     using code_t = medianc::e;
+
     code_t type_;
     std::int32_t len_;
 
@@ -264,18 +264,14 @@ struct node_t {
       return *(node + 1);
     }
 
-    template <medianc::e TYPE> auto &expect() {
-      if (this->type() != TYPE) [[unlikely]]
-        throw std::runtime_error("Expected " + std::string(medianc::str(TYPE)) +
-                                 "but have " +
+    template <medianc::e... TYPES> auto &expect() const {
+      if (!((this->type() == TYPES) || ...)) [[unlikely]] {
+        std::string expected_types =
+            ((std::string(medianc::str(TYPES)) + " or ") + ...);
+        expected_types.erase(expected_types.size() - 4); // remove last " or "
+        throw std::runtime_error("Expected " + expected_types + " but have " +
                                  std::string(medianc::str(this->type())));
-      return *this;
-    }
-    template <medianc::e TYPE> const auto &expect() const {
-      if (this->type() != TYPE)[[unlikely]]
-        throw std::runtime_error("Expected " + std::string(medianc::str(TYPE)) +
-                                 "but have " +
-                                 std::string(medianc::str(this->type())));
+      }
       return *this;
     }
   };

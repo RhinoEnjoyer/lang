@@ -14,18 +14,30 @@
 #include <string_view>
 #include <utility>
 
-void print_tokens(const token_buffer_t &buffer) {
-  std::cout << std::left << std::setw(8) << "Index" << std::setw(8) << "Type"
-            << std::setw(8) << "Row" << std::setw(8) << "Col" << std::setw(8)
-            << "Len" << "Str" << "\n";
-  std::cout << std::string(50, '-') << "\n";
+void print_tokens(const token_buffer_t &toks) {
+  std::cout << std::left 
+            << std::setw(8) << "Index" 
+            << std::setw(8) << "Type" 
+            << std::setw(8) << "Row" 
+            << std::setw(8) << "Col" 
+            << std::setw(8) << "Len" 
+            << std::setw(20) << "Str" 
+            << "TypeName"
+            << "\n";
 
-  for (auto it = buffer.toks.cbegin(); it != buffer.toks.cend(); ++it) {
-    std::size_t index = buffer.to_index(it);
-    std::cout << std::setw(8) << index << std::setw(8)
-              << static_cast<int>(it->type()) << std::setw(8) << buffer.row(it)
-              << std::setw(8) << buffer.col(it) << std::setw(8)
-              << buffer.len(it) << buffer.str(it) << "\n";
+  std::cout << std::string(80, '-') << "\n";
+
+  for (auto it = toks.toks.cbegin(); it != toks.toks.cend(); ++it) {
+    std::size_t index = toks.to_index(it);
+    std::cout << std::setw(8) << index 
+              << std::setw(8) << static_cast<int>(it->type()) 
+              << std::setw(8) << toks.row(it) 
+              << std::setw(8) << toks.col(it) 
+              << std::setw(8) << toks.len(it) 
+              << std::setw(20) << toks.str(it) 
+              << tokc::str(it->type()) 
+              << "\n";
+  std::cout << std::string(80, '-') << "\n";
   }
 }
 
@@ -67,11 +79,11 @@ int main(int argc, char *argv[]) {
 
     auto [lex_out, lex_time] = mesure([&] { return lexer::entry(&src); });
     auto &[lex_output, lex_symetrical_map] = lex_out;
-    // print_tokens(lex_output);
+    print_tokens(lex_output);
 
     auto [grammar_output, grammar_time] = mesure([&] {
       return grammar::entry(lex_output, lex_symetrical_map,
-                            lex_output.toks.cbegin(), lex_output.toks.cend());
+                            lex_output.toks.begin(), lex_output.toks.end());
     });
     grammar::traverse(lex_output, grammar_output);
 

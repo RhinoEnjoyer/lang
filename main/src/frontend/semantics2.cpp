@@ -144,6 +144,19 @@ auto trec(ctx_t &ctx, locale_ptr locale, std::vector<decl_ptr> &&members) {
       ctx.alloc<type_s::aggregate_s::rec_data_t>(locale, members)};
 }
 auto tinfered() { return type_s::infered_t{}; }
+
+auto uop(expr_s::operation_base::e op, expr_ptr operand,
+         expr_s::uop_t::payload_t payload) {
+  return expr_s::uop_t{{op}, operand, payload};
+}
+auto bop(expr_s::operation_base::e op, expr_ptr lhs, expr_ptr rhs) {
+  return expr_s::bop_t{{op}, lhs, rhs};
+}
+auto as(expr_s::operation_base::e op, expr_s::uop_t::as_payload_t payload,
+        expr_ptr operand) {
+  return uop(op, operand, expr_s::uop_t::payload_t{.as_type = payload});
+}
+
 } // namespace raw
 } // namespace make
 
@@ -434,7 +447,6 @@ auto type_recursion_check_action(ctx_t &ctx, type_ptr type) {
 
     type_recursion_checker(ctx_t &ctx) : forbiten_set(), ctx(ctx) {}
 
-  // private:
     boost::container::flat_set<uintptr_t> forbiten_set;
     ctx_t &ctx;
 
@@ -1110,16 +1122,16 @@ type_ptr type_fn(ctx_t &ctx, locale_ptr locale, const median_t &type_med) {
 }
 
 namespace decl_spec {
-  enum class decl_mode_t { BASE, ARGUMENT };
-  template <decl_mode_t mode>
-  void process_decl(ctx_t &ctx, locale_ptr locale, decl_ptr ptr,
-                    grammar::cursor_helper_t cursor);
-  void arg_decl(ctx_t &ctx, locale_ptr locale, decl_ptr ptr,
-                grammar::cursor_helper_t cursor);
-  void base_decl(ctx_t &ctx, locale_ptr locale, decl_ptr ptr,
-                 grammar::cursor_helper_t cursor);
-  void arg_decl(ctx_t &ctx, locale_ptr locale, decl_ptr ptr,
-                grammar::cursor_helper_t cursor);
+enum class decl_mode_t { BASE, ARGUMENT };
+template <decl_mode_t mode>
+void process_decl(ctx_t &ctx, locale_ptr locale, decl_ptr ptr,
+                  grammar::cursor_helper_t cursor);
+void arg_decl(ctx_t &ctx, locale_ptr locale, decl_ptr ptr,
+              grammar::cursor_helper_t cursor);
+void base_decl(ctx_t &ctx, locale_ptr locale, decl_ptr ptr,
+               grammar::cursor_helper_t cursor);
+void arg_decl(ctx_t &ctx, locale_ptr locale, decl_ptr ptr,
+              grammar::cursor_helper_t cursor);
 } // namespace decl_spec
 
 template <fnsig_mode_t mode>
@@ -1161,11 +1173,11 @@ sptr<util::fnsig_t> fnsig_fn(ctx_t &ctx, locale_ptr locale,
   if (meds.args_med) [[likely]] {
     auto cursor = grammar::cursor_helper_t{meds.args_med->children()};
     while (cursor.within()) {
-      auto decl_med = cursor.must_extract<medianc::ARGUMENT>();
-      const auto med = decl_med.fchild().as_median();
-      if (med.type() != medianc::DECL)
-        throw std::runtime_error(
-            "Function arguments can only be variable declarations");
+      // auto decl_med = cursor.must_extract<medianc::ARGUMENT>();
+      const auto med = cursor.must_extract<medianc::ARGUMENT>()
+                           .fchild()
+                           .as_median()
+                           .expect<medianc::DECL>();
       auto ptr = decl_spec_fn<decl_spec::arg_decl>(ctx, rec_locale, med);
       args.emplace_back(ptr);
     }
@@ -1282,45 +1294,48 @@ decl_ptr decl_fn(ctx_t &ctx, locale_ptr locale, const median_t &med) {
 namespace expr {
 auto token_to_operator(const tokc::e token) -> expr_s::operator_t{
   using enum expr_s::op_operation_e; 
+  using namespace make::raw;
+  expr_ptr dummy = nullptr;
   switch (token) {
-  case tokc::EQUALS:          return {EQ, {empty_t{}}};
-  case tokc::GEQUALS:         return {GEQ, {empty_t{}}};
-  case tokc::LEQUALS:         return {LEQ, {empty_t{}}};
-  case tokc::EMARKEQUALS:     return {NEQ, {empty_t{}}};
-  case tokc::PLUSASIGN:       return {PLUSASSIGN, {empty_t{}}};
-  case tokc::MINUSASIGN:      return {MINUSASSIGN, {empty_t{}}};
-  case tokc::DIVASIGN:        return {DIVASSIGN, {empty_t{}}};
-  case tokc::MULASIGN:        return {MULTASSIGN, {empty_t{}}};
-  case tokc::ASIGN:           return {ASSIGN, {empty_t{}}};
-  case tokc::PLUSPLUS:        return {PLUSPLUS, {empty_t{}}};
-  case tokc::MINUSMINUS:      return {MINUSMINUS, {empty_t{}}};
-  case tokc::GREATERGREATER:  return {SRIGHT, {empty_t{}}};
-  case tokc::LESSLESS: 				return {SLEFT, {empty_t{}}};
-  case tokc::LESSGREATER:     return {NEQ, {empty_t{}}};
-  case tokc::XOR:             return {XOR, {empty_t{}}};
-  case tokc::AND:             return {AND, {empty_t{}}};
-  case tokc::OR:              return {OR, {empty_t{}}};
-  case tokc::MODULO:          return {MOD, {empty_t{}}};
-  case tokc::PLUS:            return {PLUS, {empty_t{}}};
-  case tokc::MINUS:           return {MINUS, {empty_t{}}};
-  case tokc::DIV:             return {DIV, {empty_t{}}};
-  case tokc::MUL:             return {MULT, {empty_t{}}};
-  case tokc::LESS:            return {LESS, {empty_t{}}};
-  case tokc::GREATER:         return {GREATER, {empty_t{}}};
-  case tokc::EMARK:           return {NOT, {empty_t{}}};
-  // case tokc::PERISPOMENI:     return {DEREF, {empty_t{}}};
-  case tokc::AMPERSAND:       return {ADDRESS, {empty_t{}}};
-  case tokc::ANDASIGN:        return {ASSIGN, {empty_t{}}};
-  case tokc::ORASIGN:         return {ASSIGN, {empty_t{}}};
-  case tokc::MINUSGREATER:    return {PIPE, {empty_t{}}};
-  default:throw std::runtime_error("This token is not an operator");
+    case tokc::EQUALS:          return {bop(EQ, dummy, dummy)};
+    case tokc::GEQUALS:         return {bop(GEQ, dummy, dummy)};
+    case tokc::LEQUALS:         return {bop(LEQ,  dummy, dummy)};
+    case tokc::EMARKEQUALS:     return {bop(NEQ, dummy, dummy)};
+    case tokc::PLUSASIGN:       return {bop(PLUSASSIGN, dummy, dummy)};
+    case tokc::MINUSASIGN:      return {bop(MINUSASSIGN, dummy, dummy)};
+    case tokc::DIVASIGN:        return {bop(DIVASSIGN, dummy, dummy)};
+    case tokc::MULASIGN:        return {bop(MULTASSIGN, dummy, dummy)};
+    case tokc::ASIGN:           return {bop(ASSIGN, dummy, dummy)};
+    case tokc::PLUSPLUS:        return {uop(PLUSPLUS, dummy, {})};
+    case tokc::MINUSMINUS:      return {uop(MINUSMINUS, dummy, {})};
+    case tokc::GREATERGREATER:  return {bop(SRIGHT, dummy, dummy)};
+    case tokc::LESSLESS:        return {bop(SLEFT, dummy, dummy)};
+    case tokc::LESSGREATER:     return {bop(NEQ, dummy, dummy)};
+    case tokc::XOR:             return {bop(XOR, dummy, dummy)};
+    case tokc::AND:             return {bop(AND, dummy, dummy)};
+    case tokc::OR:              return {bop(OR, dummy, dummy)};
+    case tokc::MODULO:          return {bop(MOD, dummy, dummy)};
+    case tokc::PLUS:            return {bop(PLUS, dummy, dummy)};
+    case tokc::MINUS:           return {bop(MINUS, dummy, dummy)};
+    case tokc::DIV:             return {bop(DIV, dummy, dummy)};
+    case tokc::MUL:             return {bop(MULT, dummy, dummy)};
+    case tokc::LESS:            return {bop(LESS, dummy, dummy)};
+    case tokc::GREATER:         return {bop(GREATER, dummy, dummy)};
+    case tokc::DIAMOND:         return {bop(DIAMOND, dummy, dummy)};
+    case tokc::EMARK:           return {uop(NOT, dummy, {})};
+    case tokc::AMPERSAND:       return {uop(ADDRESS, dummy, {})};
+    case tokc::ANDASIGN:        return {bop(ASSIGN, dummy, dummy)};
+    case tokc::ORASIGN:         return {bop(ASSIGN, dummy, dummy)};
+    case tokc::MINUSGREATER:    return {bop(PIPE, dummy, dummy)};
+    default:
+      throw std::runtime_error("This token is not an operator");
   }
 }
 
-auto as_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
-    -> expr_s::operator_t::as_payload_t {
+auto as_payload_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
+    -> expr_s::uop_t::as_payload_t {
   auto type_med = med.fchild().as_median().expect<medianc::TYPE>();
-  return expr_s::operator_t::as_payload_t{type_fn(ctx, loc, type_med)};
+  return expr_s::uop_t::as_payload_t{type_fn(ctx, loc, type_med)};
 }
 
 auto operator_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
@@ -1333,25 +1348,15 @@ auto operator_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
       },
       [&ctx, &locale](const median_t &val) -> expr_s::operator_t {
         switch (val.type()) {
-        case medianc::AS:
-          return {expr_s::op_operation_e::AS,
-                  expr_s::operator_t::payload_t{.as = as_fn(ctx, locale, val)},
-                  expr_s::uop_t{}};
+        case medianc::AS: [[likely]]
+          return expr_s::operator_t{
+              make::raw::as(expr_s::op_operation_e::AS,
+                            as_payload_fn(ctx, locale, val), nullptr)};
         default:
           std::unreachable();
         }
       },
       [](const auto &) -> expr_s::operator_t { std::unreachable(); });
-  auto &meta = base.meta();
-  base = [&] -> expr_s::operator_var_t {
-    if (meta.type == expr_s::op_type_e::BINARY) {
-      return expr_s::bop_t{{nullptr}, {nullptr}};
-    } else if (meta.type == expr_s::op_type_e::UNARY) {
-      return expr_s::uop_t{{nullptr}};
-    } else {
-      std::unreachable();
-    }
-  }();
   return ctx.alloc<expr_t>(base, ctx.alloc<type_t>(empty_t{}));
 }
 
@@ -1362,8 +1367,7 @@ auto operator_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
 // }
 
 // TODO add the chain
-auto block_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
-    -> expr_s::operand_s::block_t {
+auto block_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med) -> expr_s::operand_s::block_t {
   auto locale = locale_t::make_child(ctx, loc);
 
   auto body_med = grammar::cursor_helper_t{med.children()}.must_extract<medianc::BODY>();
@@ -1372,8 +1376,7 @@ auto block_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
   return {make::raw::frame(locale, stmts)};
 }
 
-auto result_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
-    -> expr_s::operand_s::result_t {
+auto result_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med) -> expr_s::operand_s::result_t {
   auto cursor = grammar::cursor_helper_t{med.children()};
 
   auto body_med = cursor.must_extract<medianc::BODY>();
@@ -1723,11 +1726,70 @@ expr_ptr expr_fn(ctx_t &ctx, locale_ptr locale, span_t span) {
   return expr::expr_tree(ctx, locale, span);
 }
 
+void expr_printer(const token_buffer_t &toks, expr_ptr expr, const size_t indent = 0) {
+  using namespace expr_s;
+  const auto indent_str = std::string(indent * 3, ' ');
+  return ovisit(
+      *expr,
+      [&](operator_t &val) {
+        std::cout << indent_str << "operator" << std::endl;
+        ovisit(
+            val,
+            [&](uop_t &val) {
+              std::cout << indent_str << "uop" << std::endl;
+              if (!val.operand) {
+                std::cout << indent_str << "uop operand is null" << std::endl;
+              } else {
+                expr_printer(toks, val.operand, indent + 1);
+              }
+            },
+            [&](bop_t &val) {
+              std::cout << indent_str << "bop" << std::endl;
+              if (!val.lhs) {
+                std::cout << indent_str << "bop lhs operand is null"
+                          << std::endl;
+              } else {
+                std::cout << indent_str << "lhs" << std::endl;
+                expr_printer(toks, val.lhs, indent + 1);
+              }
+              if (!val.rhs) {
+                std::cout << indent_str << "bop rhs operand is null"
+                          << std::endl;
+              } else {
+                std::cout << indent_str << "rhs" << std::endl;
+                expr_printer(toks, val.rhs, indent + 1);
+              }
+            });
+      },
+      [&](operand_t &val) {
+        std::cout << indent_str << "operand" << std::endl;
+        ovisit(
+            val,
+            [&](operand_s::result_t &val) {
+              std::cout << indent_str << "result" << std::endl;
+              expr_printer(toks, val.val, indent + 1);
+            },
+            [&](operand_s::number_t &val) {
+              std::cout << indent_str << "number" << std::endl;
+            },
+            [&](auto &val) {
+              std::cout << indent_str << "some operand" << std::endl;
+            });
+      },
+      [&](auto &val) {});
+}
 expr_ptr expr_fn(ctx_t &ctx, locale_ptr locale, const median_t &med) {
   if (med.type() != medianc::EXPR)
     throw std::runtime_error("What was passed was not an expresion it was: " +
                              std::string(medianc::str(med.type())));
   auto ptr = expr::expr_tree(ctx, locale, med.children());
+
+  // if (ptr) {
+  //   expr_printer(ctx, ptr);
+  // } else {
+  //   throw std::runtime_error("Expresions can't be null");
+  // }
+
   return ptr;
 }
 

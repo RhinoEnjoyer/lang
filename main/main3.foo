@@ -20,7 +20,7 @@ core: @scope (
     data: @ptr;
     size: u64;
     capacity: u64;
-    alloc: allocator_t::alloc_fn = (
+    alloc: allocator_t::alloc_fn = {
       pool := @as{~pool_t}allocator;
       size + pool::size ->
         @if(@pipe > pool::capacity)
@@ -28,21 +28,21 @@ core: @scope (
       res := data + pool::size;
       pool::size += size;
       @ret res;
-    );
+    };
     realloc: allocator_t::realloc_fn = @null;
     free:  allocator_t::free_fn = ();
-    make: @fn(mem: @ptr; capacity: u64)(pool_t) = (@ret {pool_t}::(mem; 0; capacity));
-    make_allocator: @fn->(allocator_t) = (
+    make: @fn(mem: @ptr; capacity: u64)(pool_t) = {@ret {pool_t}::(mem; 0; capacity)};
+    make_allocator: @fn()(allocator_t) = {
       @ret {allocator_t}::(@self; pool_t::malloc; pool_t::realloc; pool_t::free);
-    );
+    };
   );
 );
 
-main: @fn(argc: s32; argv: ~~u8)(s32) = (
+main: @fn(argc: s32; argv: ~~u8)(s32) = {
   pool := @as{u64}1000 -> pool_t::make(c::malloc(@pipe); @pipe);
   allocator := pool::make_allocator();
   val: ~s32 = allocator::alloc();
-);
+};
 
 
 ffi: @scope(

@@ -552,7 +552,7 @@ constexpr auto dispatch_table = [] consteval {
   for (auto i = '0'; i <= '9'; ++i)
     asign2table(table, i, dispatch::number);
 
-  asign2table(table, ' ', dispatch::hwhitespace);
+  asign2table(table, ' ',  dispatch::hwhitespace);
   asign2table(table, '\t', dispatch::hwhitespace);
   asign2table(table, '\n', dispatch::vwhitespace);
 

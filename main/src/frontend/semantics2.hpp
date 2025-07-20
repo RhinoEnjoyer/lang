@@ -19,8 +19,10 @@
 #include <boost/preprocessor/variadic/to_seq.hpp>
 #include <functional>
 #include <list>
+#include <iostream>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -348,10 +350,6 @@ struct typeref_t {
 struct infered_t {};
 
 struct unresolved_t {
-  // locale_ptr locale;
-  // svar_ptr<type_t, type_s::typeref_t> ptr;
-  // median_t chain;
-  // bool mut;
   size_t index;
 };
 
@@ -361,47 +359,50 @@ VAR(var, empty_t, unresolved_t, primitive_t, typeref_t, indirection_t,
 
 namespace expr_s {
 #include "operator.hpp"
+
 struct operator_t;
 
-struct uop_t {
-  sptr<expr_t> operand;
+struct operation_base {
+  using e = op_operation_e;
+  e type;
+  const auto &meta() const { return op_table.at(static_cast<size_t>(type)); }
 };
-struct bop_t {
+
+struct uop_t : operation_base {
+  sptr<expr_t> operand;
+
+  struct as_payload_t {
+    type_ptr type;
+  };
+
+  union payload_t {
+    empty_t empty;
+    as_payload_t as_type;
+  } payload;
+
+  const auto as_payload() {
+    if (type == operation_base::e::AS) {
+      return payload.as_type;
+    } else {
+      throw std::runtime_error(
+          "Operator is not an as operator so we can't exctract the as payload");
+    }
+  }
+};
+
+struct bop_t : operation_base {
   sptr<expr_t> lhs;
   sptr<expr_t> rhs;
 };
 
-VAR(operator_var, empty_t, uop_t, bop_t);
-struct operator_t : public operator_var_t {
-  using internal = operator_var_t;
-  struct as_payload_t {
-    type_ptr type;
-  };
-  union payload_t {
-    empty_t empty;
-    as_payload_t as;
-  };
-  using e = op_operation_e;
-  op_operation_e type;
-  payload_t payload;
-
-  operator_t(e t, operator_var_t var)
-      : internal(var), type(t), payload(empty_t{}) {}
-  operator_t(e t, payload_t p, operator_var_t var)
-      : internal(var), type(t), payload(p) {}
-
-  auto get_as_payload() -> as_payload_t & { return payload.as; }
-  const op_meta_t &meta() { return op_table.at(static_cast<size_t>(type)); };
-
-  template <typename T> operator_t &operator=(T &&rhs) {
-    operator_var_t ::operator=(std ::forward<T>(rhs));
-    return *this;
-  }
-  template <typename T> operator_t &operator=(operator_var_t rhs) {
-    operator_var_t ::operator=(std ::forward<T>(rhs));
-    return *this;
-  }
-};
+VAR(operator_var, uop_t, bop_t);
+ESTRUCT(operator_t, operator_var_t,
+      const auto meta() const {
+      auto val = this->as_var();
+      return ovisit(val,
+                    [](const auto &val) -> const auto & { return val.meta(); });
+    }
+);
 
 namespace operand_s {
 struct number_t {

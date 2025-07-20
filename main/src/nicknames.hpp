@@ -144,8 +144,8 @@ template <typename T, typename BASE> struct ssptr {
   const sptr<BASE> ptr() const { return val; }
 };
 
-template <typename T> auto holds(auto &&val) -> bool {
-  return std::holds_alternative<T>(val);
+template <typename T, typename Variant> bool holds(Variant &&val) {
+  return std::holds_alternative<T>(std::forward<Variant>(val));
 }
 
 // made to traverse type hierarchies
