@@ -131,9 +131,6 @@ struct fnsig_t;
 } // namespace util
 
 
-namespace type_s {
-struct callable_t;
-}
 struct type_t;
 
 namespace decl_s {
@@ -282,12 +279,7 @@ struct ptr_t {
   type_ptr type;
   util::mutability_t::e mut;
 };
-// struct mptr_t {
-//   type_ptr type;
-// };
-// struct iptr_t {
-//   type_ptr type;
-// };
+
 struct optr_t {};
 
 struct array_t {
@@ -299,11 +291,12 @@ VAR(var, ptr_t, optr_t, array_t);
 USTRUCT(indirection_t, indirection_s::var_t);
 
 namespace aggregate_s {
-struct rec_data_t{
+struct rec_data_t {
   locale_ptr locale;
   std::vector<decl_ptr> members;
   boost::container::flat_map<std::string_view, size_t> name2index;
 };
+
 struct rec_t {
   sptr<rec_data_t> data;
   locale_ptr &locale() { return data->locale; }
@@ -318,19 +311,22 @@ struct rec_t {
   // Optional deref operators
   rec_data_t &operator*() { return *data; }
   const rec_data_t &operator*() const { return *data; }
-  
+
   rec_data_t *operator->() { return data.get_ptr(); }
   const rec_data_t *operator->() const { return data.get_ptr(); }
 
   // Check if initialized
   explicit operator bool() const { return bool(data); }
-  // locale_ptr locale;
-  // std::vector<decl_ptr> members;
-  // boost::container::flat_map<std::string_view, size_t> name2index;
 };
 
 struct tup_t {
-  std::vector<type_ptr> members;
+  std::vector<type_ptr> _members;
+
+  auto &members() { return this->_members; }
+  const auto &members() const { return this->_members; }
+
+  tup_t *operator->() { return this; }
+  const tup_t *operator->() const { return this; }
 };
 VAR(var, rec_t, tup_t);
 } // namespace aggregate_s
@@ -365,7 +361,7 @@ struct operator_t;
 struct operation_base {
   using e = op_operation_e;
   e type;
-  const auto &meta() const { return op_table.at(static_cast<size_t>(type)); }
+  const auto &meta() const { return op_table.at((type)); }
 };
 
 struct uop_t : operation_base {
@@ -424,6 +420,7 @@ struct result_t {
 
 struct block_t {
   util::frame_t frame;
+  type_ptr ret;
 };
 
 struct complit_t {
@@ -474,13 +471,14 @@ struct chain_t {
 };
 
 struct pipe_t {
-  expr_ptr lhs;
-  opt<chain_t> chain;
+  expr_ptr value;
 };
 
-struct sizeof_t {
-  var<type_ptr, expr_ptr> val;
+template <typename T> struct sizeof_template {
+  T val;
 };
+struct sizeof_type_t: sizeof_template<type_ptr> {};
+struct sizeof_expr_t: sizeof_template<expr_ptr> {};
 
 struct if_t {
   struct if_link_t {
@@ -497,7 +495,7 @@ struct fn_lit_t {
 };
 
 
-VAR(var, if_t, complit_t, fn_lit_t, pipe_t, sizeof_t, number_t, result_t, block_t, chain_t);
+VAR(var, if_t, complit_t, fn_lit_t, pipe_t, sizeof_type_t, sizeof_expr_t, number_t, result_t, block_t, chain_t);
 } // namespace operand_s
 
 USTRUCT(operand_t, operand_s::var_t);
@@ -507,7 +505,7 @@ VAR(var, empty_t, operator_t, operand_t);
 //struct decl_t
 ESTRUCT(decl_t, decl_s::var_t, std::string_view name; size_t index;);
 ESTRUCT(type_t, type_s::var_t, util::mutability_t mut);
-ESTRUCT(expr_t, expr_s::var_t, type_ptr type;);
+ESTRUCT(expr_t, expr_s::var_t, expr_ptr parent; type_ptr type;);
 
 // struct exprs_t {
 //   expr_ptr expr;

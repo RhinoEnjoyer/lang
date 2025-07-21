@@ -4,11 +4,15 @@ COMPLILER='clang++'
 
 # -s -fvisibility=hidden -flto
 FLAGS='-std=c++23 -Wno-c++20-extensions -Wno-c++23-extensions'
-FLAGS="$FLAGS -s -fvisibility=hidden -flto"
+FLAGS="$FLAGS -O3 -s -fvisibility=hidden -flto"
+# FLAGS="$FLAGS -O0 -g3"
+# FLAGS="$FLAGS -O0 -g0"
+
 # FLAGS="$FLAGS -S -emit-llvm"
-OLVL='-O3'
-GLVL='-g3'
-LLVM_CONF='-lLLVM-19'
+# OLVL='-O0'
+# LLVM_CONF='-lLLVM-19'
+
+LLVM_CONF="$(llvm-config --libs)"
 # LLVM_CONF=`llvm-config --cxxflags --ldflags --libs --system-libs` #no exceptions no unwinding tables --std=C++17
 # 
 
@@ -23,8 +27,6 @@ front(){
   echo "Compiling the frontend"
     $COMPLILER $GLVL $OLVL $FLAGS --shared -o lexer.so ./frontend/lexer.cpp -fPIC &
     $COMPLILER $GLVL $OLVL $FLAGS --shared -o parser.so ./frontend/parser.cpp -fPIC &
-    # $COMPLILER $GLVL $OLVL $FLAGS --shared -o semantics.so ./frontend/semantics.cpp -fPIC &
-    # $COMPLILER $GLVL $OLVL $FLAGS --shared -o semantics_print.so ./frontend/semantics_print.cpp -fPIC &
   wait
 }
 

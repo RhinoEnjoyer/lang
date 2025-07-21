@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <source_location>
 #include <print>
+#include <utility>
 
 // I need standardise the constructors
 
@@ -203,7 +204,7 @@ void register_member(type_s::aggregate_s::rec_t &rec, const size_t index,
 
 //these assume that they have all been resolved
 type_ptr get_type(expr_t &val) { return val.type; }
-type_ptr get_type(ctx_t& ctx, expr_t &val) {
+type_ptr get_type(expr_t &val, ctx_t &ctx) {
   auto type = val.type;
   if (type->is_empty_t()) {
     throw std::runtime_error("Found an expersion with a empty type and this "
@@ -213,42 +214,28 @@ type_ptr get_type(ctx_t& ctx, expr_t &val) {
 }
 type_ptr get_type(decl_s::var_decl_t &val) { return val.type; }
 type_ptr get_type(decl_s::type_decl_t &val) { return val.type; }
-type_ptr get_type(decl_t &val) {
+type_ptr get_type(decl_t &val,
+                  opt<std::reference_wrapper<ctx_t>> ctx = std::nullopt) {
   using ret = type_ptr;
-  return ovisit(val, 
-      [](decl_s::var_decl_t &val) -> ret { return get_type(val); },
+  return ovisit(
+      val, [](decl_s::var_decl_t &val) -> ret { return get_type(val); },
       [](decl_s::type_decl_t &val) -> ret { return get_type(val); },
-
-      // // //convert fnsig to fntemplate DO SOMTHING IDK
-      // [](decl_s::fn_decl_t &val) -> ret { return nullptr; },
-
-      // [&ctx](decl_s::unresolved_t &val) -> ret {
-      //   auto info = ctx.unresolved_decl_list.at(val.index);
-      //   node2ast::defer::resolve_decl_action(ctx, val);
-      //   return typeof_builtin(ctx, *info.ptr);
-      // },
-      [](auto &val) -> ret { return nullptr; });
-}
-type_ptr get_type(ctx_t& ctx, decl_t &val) {
-  using ret = type_ptr;
-  return ovisit(val, 
-      [](decl_s::var_decl_t &val) -> ret { return get_type(val); },
-      [](decl_s::type_decl_t &val) -> ret { return get_type(val); },
-
-      // // //convert fnsig to fntemplate DO SOMTHING IDK
-      // [](decl_s::fn_decl_t &val) -> ret { return nullptr; },
-
       [&ctx](decl_s::unresolved_t &val) -> ret {
-        auto info = ctx.unresolved_decl_list.at(val.index);
-        node2ast::defer::resolve_decl_action(ctx, val);
-        return get_type(ctx, *info.ptr);
+        if (!ctx)
+          return nullptr;
+        auto &vctx = ctx.value().get();
+        auto info = vctx.unresolved_decl_list.at(val.index);
+        node2ast::defer::resolve_decl_action(vctx, val);
+        return get_type(*info.ptr, vctx);
       },
       [](auto &val) -> ret { return nullptr; });
 }
+// type_ptr get_type(decl_ptr val) { return get_type(*val); }
 
-type_ptr get_type(decl_ptr val) {return get_type(*val);}
-type_ptr get_type(ctx_t& ctx, decl_ptr val) {return get_type(ctx, *val);}
-
+type_ptr get_type(decl_ptr val,
+                  opt<std::reference_wrapper<ctx_t>> ctx = std::nullopt) {
+  return get_type(*val, ctx);
+}
 
 [[nodiscard]] type_ptr get_type(type_ptr val) { return val; }
 [[nodiscard]] type_ptr get_type(ctx_t &ctx, type_ptr val) {
@@ -313,9 +300,9 @@ decl_ptr at(type_s::aggregate_s::rec_t &val, const std::string_view name) {
   }
 }
 type_ptr at(type_s::aggregate_s::tup_t &val, const size_t index) {
-  if (index > val.members.size() - 1)
+  if (index > val.members().size() - 1)
     throw std::runtime_error("Invalid index");
-  return val.members.at(index);
+  return val.members().at(index);
 }
 
 type_ptr decay(type_ptr type) {
@@ -355,10 +342,10 @@ type_ptr full_decay(type_ptr type) {
 
 
 size_t member_count_builtin(const type_s::aggregate_s::rec_t &val) {
-  return val->members.size();
+  return val.members().size();
 }
 size_t member_count_builtin(const type_s::aggregate_s::tup_t &val) {
-  return val.members.size();
+  return val.members().size();
 }
 size_t member_count_builtin(const type_s::aggregate_t &val) {
   using namespace type_s::aggregate_s;
@@ -404,12 +391,12 @@ auto type_recursion_check_action(ctx_t &ctx, type_ptr type) {
 
         auto rec_visitor = [this](rec_t &val) {
           for (auto &decl : val->locale->internals.table) {
-            auto type = get_type(ctx, decl.second);
+            auto type = get_type(decl.second, ctx);
             this->type(type);
           }
         };
         auto tup_visitor = [this](tup_t &val) {
-          for (auto &mem : val.members) {
+          for (auto &mem : val.members()) {
             auto type = get_type(ctx, mem);
             this->type(type);
           }
@@ -756,6 +743,9 @@ void fn_arg_check_action(decl_ptr ptr) {
 defered_action_t::action_fn fn_arg_check(decl_ptr ptr) {
   return [ptr] { fn_arg_check_action(ptr); };
 }
+
+void expr_type_resolve(ctx_t &ctx, expr_ptr expr) {}
+
 } // namespace defer
 } // namespace node2ast
 
@@ -1278,8 +1268,6 @@ decl_ptr decl_spec_fn(ctx_t &ctx, locale_ptr locale, const median_t &med) {
 
 decl_ptr decl_fn(ctx_t &ctx, locale_ptr locale, const median_t &med) {
   switch (med.type()) {
-  // case medianc::FN_DECL:
-  //   return decl_spec_fn<decl_spec::fn_decl>(ctx, locale, med);
   case medianc::SCOPE_DECL:
     return decl_spec_fn<decl_spec::scope_decl>(ctx, locale, med);
   case medianc::TYPE_DECL:
@@ -1293,40 +1281,39 @@ decl_ptr decl_fn(ctx_t &ctx, locale_ptr locale, const median_t &med) {
 
 namespace expr {
 auto token_to_operator(const tokc::e token) -> expr_s::operator_t{
-  using enum expr_s::op_operation_e; 
   using namespace make::raw;
   expr_ptr dummy = nullptr;
   switch (token) {
-    case tokc::EQUALS:          return {bop(EQ, dummy, dummy)};
-    case tokc::GEQUALS:         return {bop(GEQ, dummy, dummy)};
-    case tokc::LEQUALS:         return {bop(LEQ,  dummy, dummy)};
-    case tokc::EMARKEQUALS:     return {bop(NEQ, dummy, dummy)};
-    case tokc::PLUSASIGN:       return {bop(PLUSASSIGN, dummy, dummy)};
-    case tokc::MINUSASIGN:      return {bop(MINUSASSIGN, dummy, dummy)};
-    case tokc::DIVASIGN:        return {bop(DIVASSIGN, dummy, dummy)};
-    case tokc::MULASIGN:        return {bop(MULTASSIGN, dummy, dummy)};
-    case tokc::ASIGN:           return {bop(ASSIGN, dummy, dummy)};
-    case tokc::PLUSPLUS:        return {uop(PLUSPLUS, dummy, {})};
-    case tokc::MINUSMINUS:      return {uop(MINUSMINUS, dummy, {})};
-    case tokc::GREATERGREATER:  return {bop(SRIGHT, dummy, dummy)};
-    case tokc::LESSLESS:        return {bop(SLEFT, dummy, dummy)};
-    case tokc::LESSGREATER:     return {bop(NEQ, dummy, dummy)};
-    case tokc::XOR:             return {bop(XOR, dummy, dummy)};
-    case tokc::AND:             return {bop(AND, dummy, dummy)};
-    case tokc::OR:              return {bop(OR, dummy, dummy)};
-    case tokc::MODULO:          return {bop(MOD, dummy, dummy)};
-    case tokc::PLUS:            return {bop(PLUS, dummy, dummy)};
-    case tokc::MINUS:           return {bop(MINUS, dummy, dummy)};
-    case tokc::DIV:             return {bop(DIV, dummy, dummy)};
-    case tokc::MUL:             return {bop(MULT, dummy, dummy)};
-    case tokc::LESS:            return {bop(LESS, dummy, dummy)};
-    case tokc::GREATER:         return {bop(GREATER, dummy, dummy)};
-    case tokc::DIAMOND:         return {bop(DIAMOND, dummy, dummy)};
-    case tokc::EMARK:           return {uop(NOT, dummy, {})};
-    case tokc::AMPERSAND:       return {uop(ADDRESS, dummy, {})};
-    case tokc::ANDASIGN:        return {bop(ASSIGN, dummy, dummy)};
-    case tokc::ORASIGN:         return {bop(ASSIGN, dummy, dummy)};
-    case tokc::MINUSGREATER:    return {bop(PIPE, dummy, dummy)};
+    case tokc::EQUALS:          return {bop(expr_s::op_operation_e::EQ, dummy, dummy)};
+    case tokc::GEQUALS:         return {bop(expr_s::op_operation_e::GEQ, dummy, dummy)};
+    case tokc::LEQUALS:         return {bop(expr_s::op_operation_e::LEQ,  dummy, dummy)};
+    case tokc::EMARKEQUALS:     return {bop(expr_s::op_operation_e::NEQ, dummy, dummy)};
+    case tokc::PLUSASIGN:       return {bop(expr_s::op_operation_e::PLUSASSIGN, dummy, dummy)};
+    case tokc::MINUSASIGN:      return {bop(expr_s::op_operation_e::MINUSASSIGN, dummy, dummy)};
+    case tokc::DIVASIGN:        return {bop(expr_s::op_operation_e::DIVASSIGN, dummy, dummy)};
+    case tokc::MULASIGN:        return {bop(expr_s::op_operation_e::MULTASSIGN, dummy, dummy)};
+    case tokc::ASIGN:           return {bop(expr_s::op_operation_e::ASSIGN, dummy, dummy)};
+    case tokc::PLUSPLUS:        return {uop(expr_s::op_operation_e::PLUSPLUS, dummy, {})};
+    case tokc::MINUSMINUS:      return {uop(expr_s::op_operation_e::MINUSMINUS, dummy, {})};
+    case tokc::GREATERGREATER:  return {bop(expr_s::op_operation_e::SRIGHT, dummy, dummy)};
+    case tokc::LESSLESS:        return {bop(expr_s::op_operation_e::SLEFT, dummy, dummy)};
+    case tokc::LESSGREATER:     return {bop(expr_s::op_operation_e::NEQ, dummy, dummy)};
+    case tokc::XOR:             return {bop(expr_s::op_operation_e::XOR, dummy, dummy)};
+    case tokc::AND:             return {bop(expr_s::op_operation_e::AND, dummy, dummy)};
+    case tokc::OR:              return {bop(expr_s::op_operation_e::OR, dummy, dummy)};
+    case tokc::MODULO:          return {bop(expr_s::op_operation_e::MOD, dummy, dummy)};
+    case tokc::PLUS:            return {bop(expr_s::op_operation_e::PLUS, dummy, dummy)};
+    case tokc::MINUS:           return {bop(expr_s::op_operation_e::MINUS, dummy, dummy)};
+    case tokc::DIV:             return {bop(expr_s::op_operation_e::DIV, dummy, dummy)};
+    case tokc::MUL:             return {bop(expr_s::op_operation_e::MULT, dummy, dummy)};
+    case tokc::LESS:            return {bop(expr_s::op_operation_e::LESS, dummy, dummy)};
+    case tokc::GREATER:         return {bop(expr_s::op_operation_e::GREATER, dummy, dummy)};
+    case tokc::DIAMOND:         return {bop(expr_s::op_operation_e::DIAMOND, dummy, dummy)};
+    case tokc::EMARK:           return {uop(expr_s::op_operation_e::NOT, dummy, {})};
+    case tokc::AMPERSAND:       return {uop(expr_s::op_operation_e::ADDRESS, dummy, {})};
+    case tokc::ANDASIGN:        return {bop(expr_s::op_operation_e::ASSIGN, dummy, dummy)};
+    case tokc::ORASIGN:         return {bop(expr_s::op_operation_e::ASSIGN, dummy, dummy)};
+    case tokc::MINUSGREATER:    return {bop(expr_s::op_operation_e::PIPE, dummy, dummy)};
     default:
       throw std::runtime_error("This token is not an operator");
   }
@@ -1338,13 +1325,14 @@ auto as_payload_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
   return expr_s::uop_t::as_payload_t{type_fn(ctx, loc, type_med)};
 }
 
-auto operator_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
+auto operator_fn(ctx_t &ctx, locale_ptr locale, expr_ptr parent,const median_t med)
     -> svar_ptr<expr_t, expr_s::operator_t> {
   auto node = med.fchild().node();
   auto base = ovisit(
       node,
       [](const final_t &val) -> expr_s::operator_t {
-        return token_to_operator(val->type());
+        auto t = token_to_operator(val->type());
+        return t;
       },
       [&ctx, &locale](const median_t &val) -> expr_s::operator_t {
         switch (val.type()) {
@@ -1357,7 +1345,7 @@ auto operator_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
         }
       },
       [](const auto &) -> expr_s::operator_t { std::unreachable(); });
-  return ctx.alloc<expr_t>(base, ctx.alloc<type_t>(empty_t{}));
+  return ctx.alloc<expr_t>(base, parent, ctx.alloc<type_t>(empty_t{}));
 }
 
 // TODO add the chain
@@ -1373,7 +1361,7 @@ auto block_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med) -> expr_s::ope
   auto body_med = grammar::cursor_helper_t{med.children()}.must_extract<medianc::BODY>();
   auto stmts = ctx.alloc(stmts_fn(ctx, locale, body_med.children()));
 
-  return {make::raw::frame(locale, stmts)};
+  return {make::raw::frame(locale, stmts), nullptr};
 }
 
 auto result_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med) -> expr_s::operand_s::result_t {
@@ -1393,17 +1381,20 @@ auto pipe_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
   while (ch.contain(cursor)) {
     cursor.advance();
   } */
-  return expr_s::operand_s::pipe_t{{nullptr}, {std::nullopt}};
+  return expr_s::operand_s::pipe_t{{nullptr}};
 }
 
-auto sizeof_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
-    -> expr_s::operand_s::sizeof_t {
-  auto decl_or_type = med.fchild().as_median();
-  switch (decl_or_type.type()) {
+auto sizeof_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med) -> expr_s::operand_t {
+  auto expr_or_type_med = med.
+    fchild().
+    as_median().
+    expect<medianc::TYPE, medianc::EXPR>();
+
+  switch (expr_or_type_med.type()) {
   case medianc::TYPE:
-    return expr_s::operand_s::sizeof_t{type_fn(ctx, loc, decl_or_type)};
+    return {expr_s::operand_s::sizeof_type_t{type_fn(ctx, loc, expr_or_type_med)}};
   case medianc::EXPR:
-    return expr_s::operand_s::sizeof_t{expr_fn(ctx, loc, decl_or_type)};
+    return {expr_s::operand_s::sizeof_expr_t{expr_fn(ctx, loc, expr_or_type_med)}};
   default:
     std::unreachable();
   }
@@ -1411,10 +1402,7 @@ auto sizeof_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
 
 expr_s::operand_s::var_t fn_complit_fn(
     ctx_t &ctx,
-    std::tuple_element<
-        1, std::tuple<std::optional<grammar::node_t::median_proxy_t<>>,
-                      std::optional<grammar::node_t::median_proxy_t<>>>>::type
-        &cinit_med,
+    opt<median_t> cinit_med,
     type_ptr &type) {
   auto locale = get_locale(*type);
   auto stmts = ctx.alloc(stmts_fn(ctx, locale, cinit_med->children()));
@@ -1428,7 +1416,6 @@ auto complit_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
                            medianc::COMPOUND_LITERAL_INIT>();
 
   auto type = type_fn(ctx, loc, ctype_med->fchild().as_median());
-
   // if (cinit_med->children().begin()->as_median().type() == medianc::STMT) {
   if (rholds<type_s::fn_template_t>(*type)) {
     return fn_complit_fn(ctx, cinit_med, type);
@@ -1437,10 +1424,7 @@ auto complit_fn(ctx_t &ctx, sptr<locale_t> loc, const median_t med)
     auto ch = cinit_med->children();
     auto cursor = ch.begin();
     while (ch.contains(cursor)) {
-      auto med = cursor->as_median();
-      // if (med.type() != medianc::EXPR)
-      //   throw std::runtime_error(std::string(medianc::str(med.type())));
-
+      auto med = cursor->as_median().expect<medianc::EXPR>();
       exprs.push_back(expr_fn(ctx, loc, med));
       cursor.advance();
     }
@@ -1472,7 +1456,6 @@ auto if_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
 
       val.ifs.emplace_back(std::move(elif));
     } else if (var_med->type() == medianc::ELSE) {
-
       {
         if (cursor.within()) [[unlikely]]
           throw std::runtime_error(
@@ -1481,7 +1464,6 @@ auto if_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
           throw std::runtime_error(
               "Can't have more than one else in a if expr");
       }
-
       one_else = true;
       auto body_med =
           grammar::cursor_helper_t{var_med->children()}.extract<medianc::BODY>();
@@ -1525,6 +1507,9 @@ auto operand_med_fn(ctx_t &ctx, locale_ptr locale,const median_t& val)
           return expr_s::operand_t{sizeof_fn(ctx, locale, val)};
         case medianc::COMPOUND_LITERAL:
           return expr_s::operand_t{complit_fn(ctx, locale, val)};
+        case medianc::FN_LITERAL:
+          // return expr_s::operand_t{complit_fn(ctx, locale, val)};
+          throw std::runtime_error("Function litterals/lambdas are not supported yet");
         case medianc::IF_EXPR:
           return expr_s::operand_t{if_fn(ctx, locale, val)};
         case medianc::PIPE:
@@ -1532,11 +1517,11 @@ auto operand_med_fn(ctx_t &ctx, locale_ptr locale,const median_t& val)
         // case medianc::SELF:
         //   return self_fn(ctx, loc, val);
         default:
-          std::unreachable();
+          val.expect<medianc::last>();
+          // std::unreachable();
         }
-
     }
-auto operand_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
+auto operand_fn(ctx_t &ctx, locale_ptr locale, expr_ptr parent, const median_t med)
     -> expr_ptr {
   // ctx.dbg_add_call();
   auto node = med.children().begin()->node();
@@ -1545,8 +1530,6 @@ auto operand_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
       node,
       [&ctx](const final_t &val) -> expr_s::var_t {
         switch (val->type()) {
-        // this is kind of retarded but I am not sure
-        // how to represent it
         case tokc::INT:
           return expr_s::operand_t{expr_s::operand_s::number_t{{expr_s::operand_s::number_t::int_t{}}, ctx.toks().str(val)}};
         case tokc::FLOAT:
@@ -1559,165 +1542,169 @@ auto operand_fn(ctx_t &ctx, locale_ptr locale, const median_t med)
         return operand_med_fn(ctx, locale, val);
       },
       [](const auto &val) -> expr_s::var_t { std::unreachable(); });
-  *ptr = expr_t{var_val, ctx.alloc<type_t>(empty_t{})};
+  *ptr = expr_t{var_val, parent, ctx.alloc<type_t>(empty_t{})};
   return ptr;
 }
 
 namespace operator_s {
-void as() {}
+void prefix_fallback(sptr<expr_s::operator_t> &op) {
+  auto operation = op->meta().op;
+  switch (operation) {
+  case expr_s::op_operation_e::PLUS:
+    *op = make::raw::uop(expr_s::op_operation_e::POSITIVE, 0, {});
+    break;
+  case expr_s::op_operation_e::MINUS:
+    *op = make::raw::uop(expr_s::op_operation_e::NEGATIVE, 0, {});
+    break;
+  default:
+    throw std::runtime_error("Expected a prefix operator but found " +
+                             std::string(expr_s::str(op->meta())));
+  }
+}
 } // namespace operator_s
 
-expr_ptr rpn2tree(std::span<expr_ptr> queue) {
-  auto stack = list<expr_ptr>{};
-  stack.reserve(10);
-  for (auto &ptr : queue) {
-    ovisit(
-        *ptr, [&](expr_s::operand_t &) { stack.push_back(ptr); },
-        // [&](expr_s::unresolved_t&) { stack.push_back(ptr); },
-        [&](empty_t &) {},
-        [&](expr_s::operator_t &val) {
-          ovisit(
-              val,
-              [&](expr_s::bop_t &op) {
-                if (stack.size() < 2)
-                  throw std::runtime_error("Not enough operands");
-                op.rhs = std::move(stack.back());
-                stack.pop_back();
-                op.lhs = std::move(stack.back());
-                stack.pop_back();
-              },
-              [&](expr_s::uop_t &op) {
-                if (stack.size() < 1)
-                  throw std::runtime_error("Not enough operands");
-                op.operand = stack.back();
-                stack.pop_back();
-              },
-              [](auto &val) {});
-          stack.push_back(ptr);
-        },
-        [](auto &val) { std::unreachable(); });
-  }
-
-  if (stack.size() != 1)
-    throw std::runtime_error("Expresion stack needs to be 1 otherwise we did "
-                             "not consume every operand");
-
-  return stack.front();
-}
-
-expr_ptr shunting_yard(ctx_t &ctx, locale_ptr locale, span_t ch) {
-  auto cursor = ch.begin();
-
-  // https://en.wikipedia.org/wiki/Shunting_yard_algorithm
-  std::vector<expr_ptr> queue;
-  podlist_t<svar_ptr<expr_t, expr_s::operator_t>> stack;
-
-  queue.reserve(ch.size2());
-  stack.resize(ch.size2());
-  while (ch.contains(cursor)) {
-    auto med = cursor->as_median();
-    switch (med.type()) {
-    case medianc::OPERAND: {
-      auto operand = operand_fn(ctx, locale, med);
-      queue.push_back(operand);
-    } break;
-    case medianc::OPERATOR: {
-      auto op =
-          svar_ptr<expr_t, expr_s::operator_t>{operator_fn(ctx, locale, med)};
-      const auto &o1m = op.as<expr_s::operator_t>().meta();
-
-      while (stack.size() > 0) {
-        auto &o2 = stack.back();
-        const auto &o2m = o2.as<expr_s::operator_t>().meta();
-        if (o1m.prec < o2m.prec ||
-            (o1m.prec == o2m.prec && o1m.assoc == expr_s::op_assoc_e::LEFT)) {
-          queue.push_back(o2);
-          stack.pop_back();
-        } else {
-          break;
-        }
-      }
-      stack.push_back_assume_size(op);
-    } break;
-    default:
-      throw std::runtime_error("Unknown median: " +
-                               std::string(medianc::str(med.type())));
-    }
-    cursor.advance();
-  }
-  for (auto it = stack.end() - 1; it >= stack.begin(); --it)
-    queue.push_back(it->ptr);
-
-  stack.release();
-  return rpn2tree(queue);
-}
-
-expr_ptr pratt_parsing(ctx_t &ctx, locale_ptr locale, span_t ch,
-                       cursor_t cursor, size_t min_prec = 0) {
+expr_ptr pratt_parsing(ctx_t &ctx, locale_ptr locale, span_t ch, cursor_t &cursor, expr_ptr parent, size_t min_prec) {
+  expr_ptr lhs = nullptr;
   auto med = cursor++->as_median();
-
-  expr_ptr lhs;
   switch (med.type()) {
   case medianc::OPERATOR: {
-    auto op = operator_fn(ctx, locale, med);
-    const auto &meta = op->as_operator_t()->meta();
-
-    if (meta.pos != expr_s::op_pos_e::PREFIX) [[unlikely]]
-      throw std::runtime_error("This should be a prefix");
-
-    if (auto uop = op->as_operator_t()->as_uop_t()) [[likely]]{
-      uop->operand = pratt_parsing(ctx, locale, ch, cursor, meta.prec);
-      lhs = op;
+    auto op_ptr = operator_fn(ctx, locale, parent, med);
+    auto op = op_ptr->as_operator_t();
+    if (op->meta() != expr_s::op_pos_e::PREFIX) {
+      operator_s::prefix_fallback(op);
+    }
+    const auto &meta = op->meta();
+    if (auto uop = op_ptr->as_operator_t()->as_uop_t()) [[likely]] {
+      // this causes the + not passing since it set's it too high
+      uop->operand = pratt_parsing(ctx, locale, ch, cursor, op_ptr, meta.prec);
+      lhs = op_ptr;
     } else {
-      throw std::runtime_error("This should be a unary");
+      throw std::runtime_error("This should be a unary operator");
     }
     break;
   }
   case medianc::OPERAND: {
-    lhs = operand_fn(ctx, locale, med);
+    lhs = operand_fn(ctx, locale, parent, med);
     break;
   }
-  default:
-    throw std::runtime_error("Unexpected median");
-  };
-
+  default: {
+    throw std::runtime_error("Neither a Operator or Operand on the prefix stage of an expresion");
+  }
+  }
   while (ch.contains(cursor)) {
-    auto med = cursor++->as_median();
+    auto med = cursor->as_median();
     if (med.type() != medianc::OPERATOR)
       break;
+    auto op_ptr = operator_fn(ctx, locale, parent, med);
+    auto &op = op_ptr.as<expr_s::operator_t>();
+    const auto &meta = op.meta();
+    // Prefix
+    if (meta == expr_s::op_pos_e::PREFIX)
+      throw std::runtime_error("Expected Postfix or Infix operators");
+    // Postfix
+    else if (meta == expr_s::op_pos_e::POSTFIX) {
+      auto &val = *op.as_uop_t();
+      auto lprec = left_bp(meta);
+      if (lprec < min_prec)
+        break;
+      cursor.advance();
 
-    auto op = operator_fn(ctx, locale, med);
-    const auto &meta = op->as_operator_t()->meta();
-
-    if (meta.pos == expr_s::op_pos_e::PREFIX) [[unlikely]]
-      throw std::runtime_error("Unexpected prefix operator after expression");
-
-    if (meta.prec < min_prec)
-      break;
-
-    if (meta.pos == expr_s::op_pos_e::POSTFIX) [[likely]] {
-      if (auto pop = op->as_operator_t()->as_uop_t()) {
-        pop->operand = lhs;
-        lhs = op;
-        continue;
-      }
-      throw std::runtime_error("Expected postfix unary operator structure");
-    }
-
-    if (auto bop = op->as_operator_t()->as_bop_t()) {
-      size_t next_min_prec =
-          (meta.assoc == expr_s::op_assoc_e::LEFT) ? meta.prec + 1 : meta.prec;
-      bop->lhs = lhs;
-      bop->rhs = pratt_parsing(ctx, locale, ch, cursor, next_min_prec);
-      lhs = op;
+      val.operand = lhs;
+      lhs = op_ptr;
       continue;
     }
-    throw std::runtime_error("Expected binary operator structure");
+    // Infix
+    else if (meta == expr_s::op_pos_e::INFIX) {
+      auto &val = *op.as_bop_t();
+      auto lprec = left_bp(meta);
+      auto rprec = right_bp(meta);
+      if (lprec < min_prec)
+        break;
+      cursor.advance();
+
+      expr_ptr rhs = pratt_parsing(ctx, locale, ch, cursor, parent, rprec);
+      val.lhs = lhs; // <--- attach lhs and rhs to the operator
+      val.rhs = rhs;
+      lhs = op_ptr; // <--- new lhs is the combined binary operation
+      continue;
+    }
+    break;
   }
   return lhs;
 }
+void expr_printer(const token_buffer_t &toks, expr_ptr expr,
+                  const size_t indent = 0) {
+  using namespace expr_s;
+  auto indent_str = std::string(indent * 3, ' ');
+  return ovisit(
+      *expr,
+      [&](operator_t &val) {
+        ovisit(
+            val,
+            [&](uop_t &uop) {
+              std::cout << indent_str << "operator: unary ("
+                        << expr_s::str(uop.meta().op) << ")\n";
+              if (!uop.operand) {
+                std::cout << indent_str << "  operand: null\n";
+              } else {
+                expr_printer(toks, uop.operand, indent + 1);
+              }
+            },
+            [&](bop_t &bop) {
+              std::cout << indent_str << "operator: binary ("
+                        << expr_s::str(bop.meta().op) << ")\n";
+
+              if (!bop.lhs) {
+                std::cout << indent_str << "  lhs: null\n";
+              } else {
+                std::cout << indent_str << "  lhs:\n";
+                expr_printer(toks, bop.lhs, indent + 2);
+              }
+
+              if (!bop.rhs) {
+                std::cout << indent_str << "  rhs: null\n";
+              } else {
+                std::cout << indent_str << "  rhs:\n";
+                expr_printer(toks, bop.rhs, indent + 2);
+              }
+            });
+      },
+      [&](operand_t &val) {
+        ovisit(
+            val,
+            [&](operand_s::result_t &res) {
+              std::cout << indent_str << "operand: result\n";
+              expr_printer(toks, res.val, indent + 1);
+            },
+            [&](operand_s::number_t &) {
+              std::cout << indent_str << "operand: number\n";
+            },
+            [&](auto &) { std::cout << indent_str << "operand: other\n"; });
+      },
+      [&](auto &) { std::cout << indent_str << "unknown expr type\n"; });
+}
+
 expr_ptr expr_tree(ctx_t &ctx, locale_ptr locale, span_t ch) {
-  auto ptr = pratt_parsing(ctx, locale, ch, ch.begin());
+  auto cursor = ch.begin();
+  auto ptr = pratt_parsing(ctx, locale, ch, cursor, 0, 0);
+  if (ch.contains(cursor)) {
+    throw std::runtime_error("Did not consume the whole expresion");
+  }
+
+  if (ptr) {
+    expr_printer(ctx, ptr);
+  } else {
+    throw std::runtime_error("Expresions can't be null >_< ");
+  }
+
+  ctx.actions.schedule([ptr] {
+    
+    // enrich the nested expresions with their parents
+    // find every expresion under this one that has a null parent
+    // if you found it, it means that is your child
+    // resolve the type
+    (void)(ptr);
+  });
   return ptr;
 }
 } // namespace expr
@@ -1726,69 +1713,14 @@ expr_ptr expr_fn(ctx_t &ctx, locale_ptr locale, span_t span) {
   return expr::expr_tree(ctx, locale, span);
 }
 
-void expr_printer(const token_buffer_t &toks, expr_ptr expr, const size_t indent = 0) {
-  using namespace expr_s;
-  const auto indent_str = std::string(indent * 3, ' ');
-  return ovisit(
-      *expr,
-      [&](operator_t &val) {
-        std::cout << indent_str << "operator" << std::endl;
-        ovisit(
-            val,
-            [&](uop_t &val) {
-              std::cout << indent_str << "uop" << std::endl;
-              if (!val.operand) {
-                std::cout << indent_str << "uop operand is null" << std::endl;
-              } else {
-                expr_printer(toks, val.operand, indent + 1);
-              }
-            },
-            [&](bop_t &val) {
-              std::cout << indent_str << "bop" << std::endl;
-              if (!val.lhs) {
-                std::cout << indent_str << "bop lhs operand is null"
-                          << std::endl;
-              } else {
-                std::cout << indent_str << "lhs" << std::endl;
-                expr_printer(toks, val.lhs, indent + 1);
-              }
-              if (!val.rhs) {
-                std::cout << indent_str << "bop rhs operand is null"
-                          << std::endl;
-              } else {
-                std::cout << indent_str << "rhs" << std::endl;
-                expr_printer(toks, val.rhs, indent + 1);
-              }
-            });
-      },
-      [&](operand_t &val) {
-        std::cout << indent_str << "operand" << std::endl;
-        ovisit(
-            val,
-            [&](operand_s::result_t &val) {
-              std::cout << indent_str << "result" << std::endl;
-              expr_printer(toks, val.val, indent + 1);
-            },
-            [&](operand_s::number_t &val) {
-              std::cout << indent_str << "number" << std::endl;
-            },
-            [&](auto &val) {
-              std::cout << indent_str << "some operand" << std::endl;
-            });
-      },
-      [&](auto &val) {});
-}
+
+
 expr_ptr expr_fn(ctx_t &ctx, locale_ptr locale, const median_t &med) {
   if (med.type() != medianc::EXPR)
     throw std::runtime_error("What was passed was not an expresion it was: " +
                              std::string(medianc::str(med.type())));
   auto ptr = expr::expr_tree(ctx, locale, med.children());
 
-  // if (ptr) {
-  //   expr_printer(ctx, ptr);
-  // } else {
-  //   throw std::runtime_error("Expresions can't be null");
-  // }
 
   return ptr;
 }

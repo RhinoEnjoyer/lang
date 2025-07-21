@@ -22,7 +22,7 @@ void print_tokens(const token_buffer_t &toks) {
             << std::setw(8) << "Col" 
             << std::setw(8) << "Len" 
             << std::setw(20) << "Str" 
-            << "TypeName"
+            << "Type Name"
             << "\n";
 
   std::cout << std::string(80, '-') << "\n";
